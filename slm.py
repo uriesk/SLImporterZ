@@ -24,58 +24,32 @@ import bpy
 from . import llsdz
 
 import os
+import io
 import time
 import traceback
 from bpy_extras.io_utils import ImportHelper
 import zlib
 
 
-def get_slm_header(slm_data):
-    """ Extract of the llsd header from slm data """
-    if slm_data[0] != ord('{'):
-        raise ValueError("SLM doesn't start with '{'")
-    depth = 0
-    i = 0
-    in_string = False
-    escape = False
-    # TODO: This does not work, we are binary here
-    while i < len(slm_data):
-        c = slm_data[i]
-        if escape:
-            escape = False
-        elif c == ord('\\'):
-            escape = True
-        elif c == ord('"') and not in_string:
-            in_string = True
-        elif c == ord('"') and in_string:
-            in_string = False
-        elif not in_string:
-            if c == ord('{'):
-                depth += 1
-            elif c == ord('}'):
-                depth -= 1
-                if depth == 0:
-                    break
-        i += 1
-    if i >= len(slm_data):
-        raise ValueError("Could not read SLM header")
-    i += 1
-    header_data = slm_data[0: i]
-    try:
-        slm_metadata = llsdz.parse_binary_nohdr(header_data)
-    except Exception as e:
-        raise ValueError("Could not read SLM header")
-    return slm_metadata, len(header_data)
+def import_slm(stream, **kwargs):
+    filepath = kwargs.get("filepath", None)
+    create_debug_info = kwargs.get("create_debug_info", False)
 
-def import_slm(slm_data, options=None):
-    if options is None:
-        options = {}
-    filepath = options.get("filepath", None)
-    create_debug_info = options.get("create_debug_info", False)
+    if isinstance(stream, bytes):
+        stream = io.BytesIO(stream)
+
     # SLM format
     # https://wiki.secondlife.com/wiki/Mesh/Mesh_Asset_Format
     # header as binary llsd map
-    slm_metadata, header_size = get_slm_header(slm_data)
+    start_pos = stream.tell()
+    parser = llsdz.parseobj()
+    while True:
+        chunk = stream.read(1024)
+        if not chunk:
+            break
+        if parser.parse(chunk):
+            break
+    slm_metadata, header_size = parser.flush()
 
     if create_debug_info and filepath is not None:
         # Print structure into debug file within same folder
@@ -86,10 +60,30 @@ def import_slm(slm_data, options=None):
             f.write('\n'.join(tree_lines))
 
     if "high_lod" in slm_metadata and isinstance(slm_metadata["high_lod"], dict):
-        print("header size: " + str(header_size))
-        lod_offset = header_size + slm_metadata["high_lod"]["offset"]
+        lod_offset = start_pos + header_size + slm_metadata["high_lod"]["offset"]
         lod_size = slm_metadata["high_lod"]["size"]
-        lod_data = llsdz.parse_binary_nohdr(zlib.decompress(slm_data[lod_offset:lod_offset + lod_size]))
+        stream.seek(lod_offset - stream.tell(), io.SEEK_CUR)
+
+        decompressor = zlib.decompressobj()
+        parser = llsdz.parseobj()
+        size_left = lod_size
+        while size_left > 0:
+            chunk_size = min(131072, size_left)
+            chunk = stream.read(chunk_size)
+            if not chunk:
+                break
+            size_left -= chunk_size
+            decompressed_chunk = decompressor.decompress(chunk)
+            if decompressed_chunk:
+                if parser.parse(decompressed_chunk):
+                    break
+    
+        final_chunk = decompressor.flush()
+        if final_chunk and not parser.done:
+            parser.parse(final_chunk)
+        lod_data, _ = parser.flush()
+        del decompressor
+        del parser
 
         if create_debug_info and filepath is not None:
             # Print structure into debug file within same folder
@@ -246,10 +240,10 @@ class SLIZ_IMPORT_slm(bpy.types.Operator, ImportHelper):
         try:
             with open(self.filepath, 'rb') as f:
                 slm_data = f.read()
-            import_slm(slm_data, {
-                "filepath": self.filepath,
-                "create_debug_info": self.create_debug_info
-            })
+            import_slm(slm_data,
+                filepath=self.filepath,
+                create_debug_info=self.create_debug_info
+            )
         except Exception as e:
             self._notify({'ERROR'}, str(e))
             return {'CANCELLED'}

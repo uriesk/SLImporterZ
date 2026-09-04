@@ -185,35 +185,32 @@ class SLIZ_IMPORT_oxp(bpy.types.Operator, ImportHelper):
         # OXP is zlib compressed binary llsd
         try:
             decompressor = zlib.decompressobj()
-            decompressed_data = []
+            parser = llsdz.parseobj()
             with open(self.filepath, 'rb') as f:
                 while True:
-                    chunk = f.read(65536)
+                    chunk = f.read(131072)
                     if not chunk:
                         break
                     decompressed_chunk = decompressor.decompress(chunk)
                     if decompressed_chunk:
-                        decompressed_data.append(decompressed_chunk)
+                        if parser.parse(decompressed_chunk):
+                            break
 
                 final_chunk = decompressor.flush()
-                if final_chunk:
-                    decompressed_data.append(final_chunk)
-            # Combine all parts
-            decompressed_data = b''.join(decompressed_data)
+                if final_chunk and not parser.done:
+                    parser.parse(final_chunk)
+            oxp_data, _ = parser.flush()
             del decompressor
+            del parser
         except zlib.error as e:
             self._notify({'ERROR'}, f"Could not decompress file. {e}")
+            return {'CANCELLED'}
+        except llsdz.error as e:
+            self._notify({'ERROR'}, f"Could not parse llsd in file. {e}")
             return {'CANCELLED'}
         except Exception as e:
             self._notify({'ERROR'}, f"Could not read file. {e}")
             return {'CANCELLED'}
-
-        try:
-            oxp_data = llsdz.parse_binary_nohdr(decompressed_data)
-        except Exception as e:
-            self._notify({'ERROR'}, f"Could not parse LLSD. {e}")
-            return {'CANCELLED'}
-        del decompressed_data
 
         if self.create_debug_info:
             # Print structure into debug file within same folder
@@ -244,10 +241,11 @@ class SLIZ_IMPORT_oxp(bpy.types.Operator, ImportHelper):
                     with open(slm_filepath, 'wb') as f:
                         f.write(slm_data)
 
-                slm.import_slm(slm_data, {
-                    "filepath": slm_filepath,
-                    "create_debug_info": self.create_debug_info
-                })
+                slm.import_slm(
+                    slm_data,
+                    filepath=slm_filepath,
+                    create_debug_info=self.create_debug_info
+                )
 
         if amount_meshes == 0:
             self._notify({'INFO'}, f"No mesh found in {self.filepath}")

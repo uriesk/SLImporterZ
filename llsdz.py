@@ -21,10 +21,20 @@ import datetime
 import io
 import struct
 import uuid
+from enum import Enum
 
+class PARSER_STATE(Enum):
+    BEGIN = 0
+    FETCHING = 1
+    MAP = 2
+    ARRAY = 3
+    STRING = 4
+    RAW_STRING = 5
+    DATE = 6
+    BINARY = 7
+    END = 8
 
 MAX_PARSE_DEPTH = 200
-BINARY_HEADER = b'<? llsd/binary ?>'
 
 _X_ORD = ord(b'x')
 _BACKSLASH_ORD = ord(b'\\')
@@ -33,290 +43,340 @@ _DECODE_BUFF_ALLOC_SIZE = 1024
 class uri(str):
     pass
 
-class LLSDParseError(Exception):
+class LLSDError(Exception):
     pass
 
-class LLSDSerializationError(TypeError):
+error = LLSDError
+
+class LLSDParseError(LLSDError):
     pass
 
-class LLSDBaseParser(object):
-    """
-    Utility methods useful for parser subclasses.
-    """
-    def __init__(self, something):
-        self._reset(something)
-        # Scratch space for decoding delimited strings
-        self._decode_buff = bytearray(_DECODE_BUFF_ALLOC_SIZE)
+class LLSDSerializationError(LLSDError):
+    pass
 
-    def _reset(self, something):
-        if isinstance(something, LLSDBaseParser):
-            # When passed an existing LLSDBaseParser (subclass) instance, just
-            # borrow its existing _stream.
-            self._stream = something._stream
-        elif isinstance(something, bytes):
-            # Wrap an incoming bytes string into a stream. If the passed bytes
-            # string is so large that the overhead of copying it into a
-            # BytesIO is significant, advise caller to pass a stream instead.
-            self._stream = io.BytesIO(something)
-        elif isinstance(something, io.IOBase):
-            # 'something' is a proper IO stream - must be seekable for parsing
-            if something.seekable():
-                self._stream = something
+def _check_for_delimiter(chunk, delimiter):
+    i = 0
+    while i < len(chunk):
+        if chunk[i] == _BACKSLASH_ORD:
+            i += 1
+        elif chunk[i] == delimiter:
+            return i
+        i += 1
+    return -1
+
+# map char following escape char
+_escaped = {
+    ord(b'a'): ord(b'\a'),
+    ord(b'b'): ord(b'\b'),
+    ord(b'f'): ord(b'\f'),
+    ord(b'n'): ord(b'\n'),
+    ord(b'r'): ord(b'\r'),
+    ord(b't'): ord(b'\t'),
+    ord(b'v'): ord(b'\v'),
+}
+
+def _bytes_to_string(data):
+    buff = bytearray(len(data))
+    size = len(data)
+    insert_idx = 0
+    i = 0
+    while i < size:
+        cc = data[i]
+        if cc == _BACKSLASH_ORD:
+            i += 1
+            if i >= size:
+                break;
+            cc = data[i]
+            if cc == _X_ORD:
+                # It's a hex escape. char is the value of the two
+                # following hex nybbles.
+                i += 1
+                if i + 2 >= size:
+                    break;
+                cc = int(data[i:i+2], 16)
+                i += 1
             else:
-                raise LLSDParseError(
-                    "Cannot parse LLSD from non-seekable stream."
-                )
-        else:
-            # Invalid input type - raise a clear error
-            # This catches MagicMock and other non-stream objects that might
-            # have read/seek attributes but aren't actual IO streams
-            raise LLSDParseError(
+                cc = _escaped.get(cc, cc)
+        buff[insert_idx] = cc
+        insert_idx += 1
+        i += 1
+    return buff[:insert_idx].decode('utf-8')
+
+class LLSDBinaryParser():
+    """
+        Parse llsd binary to a python object.
+    """
+    def __init__(self, **kwargs):
+        self.state = 0
+        self.error = None
+        self.size_to_read = 1
+        self.delimiter = None
+        self.overhead = b''
+        self._data = None
+        self._levels = []
+        self._c_key = None
+        # starts
+        self.bytes_read = 0
+
+    """
+        method called from outside to consume stream in chunks
+    """
+    def parse(self, chunk):
+        if self.overhead:
+            chunk = self.overhead + chunk
+
+        while self.delimiter is not None or self.size_to_read > 0:
+            # read specific amount of bytes
+            if self.size_to_read > 0:
+                if len(chunk) < self.size_to_read:
+                    self.overhead = chunk
+                    return False
+                else:
+                    data = chunk[:self.size_to_read]
+                    chunk = chunk[self.size_to_read:]
+                    self.size_to_read = 0
+                    if self._parse(data):
+                        self.done = True
+                        return True
+
+            # read till delimiter
+            if self.delimiter is not None:
+                i = _check_for_delimiter(chunk)
+                if i < 0:
+                    self.overhead = chunk
+                    return False
+                else:
+                    data = chunk[:i]
+                    chunk = chunk[i+1:]
+                    self.delimiter = None
+                    if self._parse(data):
+                        self.done = True
+                        return True
+        self.done = True
+        return True
+
+    """
+        finalizing parsing
+    """
+    def flush(self):
+        finished = self.parse(b'')
+        if not finished:
+            raise LLSDParseError("Data incomplete")
+        return self._data, self.bytes_read
+
+    def _parse(self, data):
+        value = None
+        if len(data) == 1:
+            print("op: " + str(ord(data)))
+        self.bytes_read += len(data)
+        match self.state:
+            case 0: # outside
+                match ord(data):
+                    case 33:
+                        # '!' = null
+                        value = None
+                    case 48:
+                        # '0' = false
+                        value = False
+                    case 49:
+                        # '1' = true
+                        value = True
+                    case 105:
+                        # 'i' = integer
+                        self.state = 1;
+                        self.size_to_read = 4
+                    case 115 | 108:
+                        # 's' = string
+                        # 'l' = uri
+                        self.state = 2
+                        self.size_to_read = 4
+                    case 114:
+                        # 'r' = real number
+                        self.state = 4
+                        self.size_to_read = 8
+                    case 117:
+                        # 'u' = uuid
+                        self.state = 5
+                        self.size_to_read = 16
+                    case 100:
+                        # 'd' = date
+                        self.state = 6
+                        self.size_to_read = 8
+                    case 98:
+                        # 'b' = binary
+                        self.state = 7
+                        self.size_to_read = 4
+                    case 123:
+                        # '{' = map
+                        print("map opens")
+                        self.state = 9
+                        self.size_to_read = 4
+                    case 91:
+                        # '[' = array
+                        self.state = 23
+                        self.size_to_read = 4
+                    case 93:
+                        # ']' array closes
+                        self._levels.pop()
+                        if not self._levels:
+                            return True
+                        else:
+                            level = self._levels[-1]
+                            if isinstance(level, dict):
+                                self.state = 20
+                                self.size_to_read = 1
+                            if isinstance(level, list):
+                                self.state = 0
+                                self.size_to_read = 1
+                    case _:
+                        raise LLSDParseError("Invalid binary token")
+
+            case 1:
+                # integer
+                value = struct.unpack("!i", data)[0]
+            case 2:
+                # size of string
+                self.state = 3
+                self.size_to_read = struct.unpack("!i", data)[0]
+                print("got size: " + str(self.size_to_read))
+                if self.size_to_read == 0:
+                    value = ""
+            case 3:
+                # string
+                value = _bytes_to_string(data)
+            case 4:
+                # real number
+                value = struct.unpack("!d", data)[0]
+            case 5:
+                # uuid
+                value = uuid.UUID(bytes=data)
+            case 6:
+                # date
+                print("parse date: " + str(len(data)))
+                timestamp = struct.unpack("<d", data)[0]
+                value = datetime.datetime.utcfromtimestamp(timestamp)
+            case 7:
+                # size of binary
+                self.state = 8
+                self.size_to_read = struct.unpack("!i", data)[0]
+                if self.size_to_read == 0:
+                    value = b''
+            case 8:
+                # binary
+                value = data
+            case 9:
+                # map
+                # we ignore its length, which we would have fetched here
+                value = {}
+                print("got map length " + str(struct.unpack("!i", data)[0]))
+            case 20:
+                # map key format
+                ord_key = ord(data)
+                match ord_key:
+                    case 107:
+                        # 'k' length proceeded string
+                        self.state = 21
+                        self.size_to_read = 4
+                    case 39 | 34:
+                        # "'" | '"' deliminated string
+                        self.state = 22
+                        self.delimiter = ord_key
+                    case 125:
+                        # '}' map closes
+                        print("close dict")
+                        self._levels.pop()
+                        if not self._levels:
+                            return True
+                        else:
+                            level = self._levels[-1]
+                            if isinstance(level, dict):
+                                self.state = 20
+                                self.size_to_read = 1
+                            if isinstance(level, list):
+                                self.state = 0
+                                self.size_to_read = 1
+                    case _:
+                        raise LLSDParseError("Invalid binary token")
+            case 21:
+                # size of key in map
+                self.state = 22
+                self.size_to_read = struct.unpack("!i", data)[0]
+            case 22:
+                # key in map
+                self.state = 0
+                self.size_to_read = 1
+                self._c_key = _bytes_to_string(data)
+                print("got key " + self._c_key)
+            case 23:
+                # array
+                # we ignore its length, which we would have fetched here
+                value = []
+
+        if value is not None:
+            print("value: " + type(value).__name__)
+            if not self._levels:
+                self._data = value
+                if not isinstance(value, dict) and not isinstance(value, list):
+                    return True
+            else:
+                level = self._levels[-1]
+                if isinstance(level, dict):
+                    # dict
+                    print("add " + self._c_key + " to dic of " + type(value).__name__)
+                    level[self._c_key] = value
+                    self._c_key = None
+                else:
+                    # list
+                    print("add to array " + type(value).__name__)
+                    level.append(value)
+
+            if isinstance(value, dict) or isinstance(value, list):
+                print("added dict or map")
+                self._levels.append(value)
+                if len(self._levels) > MAX_PARSE_DEPTH:
+                    raise LLSDParseError("Parse depth exceeded maximum") 
+
+            self.size_to_read = 1
+            if isinstance(self._levels[-1], dict):
+                # get next key
+                self.state = 20
+            else:
+                # get next element
+                self.state = 0
+
+        return False
+
+def parse_binary(something, **kwargs):
+    print("parse")
+    if isinstance(something, bytes):
+        something = io.BytesIO(something)
+
+    if isinstance(something, io.IOBase):
+        llsd_reader = LLSDBinaryParser(**kwargs)
+
+        chunk = something.read(65536)
+        binary_header = b'<? llsd/binary ?>'
+        if chunk.startswith(binary_header):
+            chunk = chunk[len(binary_header):]
+        finished = llsd_reader.parse(chunk)
+
+        while not finished:
+            chunk = something.read(65536)
+            if not chunk:
+                break
+            finished = llsd_reader.parse(chunk)
+        llsd_data = llsd_reader.flush()
+        return llsd_data
+    else:
+        raise LLSDParseError(
                 "Cannot parse LLSD from {0}. "
                 "Expected bytes or a seekable io.IOBase object.".format(
                     type(something).__name__
                 )
             )
 
-    def remainder(self):
-        # return a stream object representing the parse input (from last
-        # _reset() call), whose read position is set past scanned input
-        return self._stream
-
-    def _next_nonblank(self):
-        # we directly call read() rather than getc() because our caller is
-        # prepared to handle empty string, meaning EOF
-        # (YES we want the walrus operator)
-        c = self._stream.read(1)
-        while c.isspace():
-            c = self._stream.read(1)
-        return c
-
-    def _getc(self, num=1, full=True):
-        got = self._stream.read(num)
-        if full and len(got) < num:
-            self._error("Trying to read past end of stream")
-        return got
-
-    def _error(self, message, offset=0):
-        oldpos = self._stream.tell()
-        # 'offset' is relative to current pos
-        self._stream.seek(offset, io.SEEK_CUR)
-        raise LLSDParseError("%s at byte %d: %r" %
-                             (message, oldpos+offset, self._getc(1, full=False)))
-
-    # map char following escape char to corresponding character
-    _escaped = {
-        ord(b'a'): ord(b'\a'),
-        ord(b'b'): ord(b'\b'),
-        ord(b'f'): ord(b'\f'),
-        ord(b'n'): ord(b'\n'),
-        ord(b'r'): ord(b'\r'),
-        ord(b't'): ord(b'\t'),
-        ord(b'v'): ord(b'\v'),
-    }
-
-    def _parse_string_delim(self, delim):
-        "Parse a delimited string."
-        insert_idx = 0
-        delim_ord = ord(delim)
-        # Preallocate a working buffer for the decoded string output
-        # to avoid allocs in the hot loop.
-        decode_buff = self._decode_buff
-        # Cache this in locals, otherwise we have to perform a lookup on
-        # `self` in the hot loop.
-        getc = self._getc
-        cc = 0
-        while True:
-            try:
-                cc = ord(getc())
-
-                if cc == _BACKSLASH_ORD:
-                    # Backslash, figure out if this is an \xNN hex escape or
-                    # something like \t
-                    cc = ord(getc())
-                    if cc == _X_ORD:
-                        # It's a hex escape. char is the value of the two
-                        # following hex nybbles. This slice may result in
-                        # a short read (0 or 1 bytes), but either a
-                        # `ValueError` will be triggered by the first case,
-                        # and the second will cause an `IndexError` on the
-                        # next iteration of the loop.
-                        hex_bytes = getc(2)
-                        try:
-                            # int() can parse a `bytes` containing hex,
-                            # no explicit `bytes.decode("ascii")` required.
-                            cc = int(hex_bytes, 16)
-                        except ValueError as e:
-                            # One of the hex characters was likely invalid.
-                            # Wrap the ValueError so that we can provide a
-                            # byte offset in the error.
-                            self._error(e, offset=-2)
-                    else:
-                        # escape char preceding anything other than the chars
-                        # in _escaped just results in that same char without
-                        # the escape char
-                        cc = self._escaped.get(cc, cc)
-                elif cc == delim_ord:
-                    break
-            except IndexError:
-                # We can be reasonably sure that any IndexErrors inside here
-                # were caused by an out-of-bounds `buff[read_idx]`.
-                self._error("Trying to read past end of buffer")
-
-            try:
-                decode_buff[insert_idx] = cc
-            except IndexError:
-                # Oops, that overflowed the decoding buffer, make a
-                # new expanded buffer containing the existing contents.
-                decode_buff = bytearray(decode_buff)
-                decode_buff.extend(b"\x00" * _DECODE_BUFF_ALLOC_SIZE)
-                decode_buff[insert_idx] = cc
-
-            insert_idx += 1
-
-        # Sync our local read index with the canonical one
-        try:
-            # Slice off only what we used of the working decode buffer
-            return decode_buff[:insert_idx].decode('utf-8')
-        except UnicodeDecodeError as exc:
-            self._error(exc)
-
-class LLSDBinaryParser(LLSDBaseParser):
-    """
-        Parse llsd binary to a python object.
-    """
-    def __init__(self, something, options=None):
-        if options is None:
-            options = {}
-        self._keep_binary = not options.get("ignore_binary", False)
-
-        super(LLSDBinaryParser, self).__init__(something)
-        # One way of dispatching based on the next character we see would be a
-        # dict lookup, and indeed that's the best way to express it in source.
-        _dispatch_dict = {
-            b'{': self._parse_map,
-            b'[': self._parse_array,
-            b'!': lambda: None,
-            b'0': lambda: False,
-            b'1': lambda: True,
-            # 'i' = integer
-            b'i': lambda: struct.unpack("!i", self._getc(4))[0],
-            # 'r' = real number
-            b'r': lambda: struct.unpack("!d", self._getc(8))[0],
-            # 'u' = uuid
-            b'u': lambda: uuid.UUID(bytes=self._getc(16)),
-            # 's' = string
-            b's': self._parse_string,
-            # delimited/escaped string
-            b"'": lambda: self._parse_string_delim(b"'"),
-            b'"': lambda: self._parse_string_delim(b'"'),
-            # 'l' = uri
-            b'l': lambda: uri(self._parse_string()),
-            # 'd' = date in seconds since epoch
-            b'd': self._parse_date,
-            # 'b' = binary
-            # *NOTE: if not self._keep_binary, maybe have a binary placeholder
-            # which has the length.
-            b'b': lambda: bytes(self._parse_string_raw()) if self._keep_binary else None,
-            }
-        # But in fact it should be even faster to construct a list indexed by
-        # ord(char). Start by filling it with the 'else' case. Use offset=-1
-        # because by the time we perform this lookup, we've scanned past the
-        # lookup char.
-        self._dispatch = 256*[lambda: self._error("invalid binary token", -1)]
-        # Now use the entries in _dispatch_dict to set the corresponding
-        # entries in _dispatch.
-        for c, func in _dispatch_dict.items():
-            self._dispatch[ord(c)] = func
-        self._depth = 0
-
-    def parse(self):
-        """
-            This is the basic public interface for parsing.
-            :returns: returns a python object.
-        """
-        try:
-            return self._parse()
-        except struct.error as exc:
-            self._error(exc)
-
-    def _parse(self):
-        "The actual parser which is called recursively when necessary."
-        if self._depth > MAX_PARSE_DEPTH:
-            self._error("Parse depth exceeded maximum depth of %d." % MAX_PARSE_DEPTH)
-
-        cc = self._getc()
-        try:
-            func = self._dispatch[ord(cc)]
-        except IndexError:
-            self._error("invalid binary token", -1)
-        else:
-            return func()
-
-    def _parse_map(self):
-        "Parse a single llsd map"
-        rv = {}
-        size = struct.unpack("!i", self._getc(4))[0]
-        count = 0
-        cc = self._getc()
-        key = b''
-        self._depth += 1
-        while (cc != b'}') and (count < size):
-            if cc == b'k':
-                key = self._parse_string()
-            elif cc in (b"'", b'"'):
-                key = self._parse_string_delim(cc)
-            else:
-                self._error("invalid map key", -1)
-            value = self._parse()
-            rv[key] = value
-            count += 1
-            cc = self._getc()
-        if cc != b'}':
-            self._error("invalid map close token")
-        self._depth -= 1
-        return rv
-
-    def _parse_array(self):
-        "Parse a single llsd array"
-        rv = []
-        self._depth += 1
-        size = struct.unpack("!i", self._getc(4))[0]
-        for count in range(size):
-            rv.append(self._parse())
-        if self._getc() != b']':
-            self._error("invalid array close token")
-        self._depth -= 1
-        return rv
-
-    def _parse_string(self):
-        try:
-            return self._parse_string_raw().decode('utf-8')
-        except UnicodeDecodeError as exc:
-            self._error(exc)
-
-    def _parse_string_raw(self):
-        "Parse a string which has the leadings size indicator"
-        try:
-            size = struct.unpack("!i", self._getc(4))[0]
-        except struct.error as exc:
-            # convert exception class for client convenience
-            self._error("struct " + str(exc))
-        rv = self._getc(size)
-        return rv
-
-    def _parse_date(self):
-        seconds = struct.unpack("<d", self._getc(8))[0]
-        try:
-            return datetime.datetime.utcfromtimestamp(seconds)
-        except (OSError, OverflowError) as exc:
-            # A garbage seconds value can cause utcfromtimestamp() to raise
-            # OverflowError: timestamp out of range for platform time_t
-            self._error(exc, -8)
-
-def parse_binary_nohdr(something):
-    # TODO ignore parser.matchseq(BINARY_HEADER)
-    return LLSDBinaryParser(something).parse()
+def parseobj(**kwargs):
+    return LLSDBinaryParser(**kwargs)
 
 def print_tree(data, indent="", prefix="", is_last=True):
     """Return a string representation of the tree structure."""
@@ -357,6 +417,9 @@ def print_tree(data, indent="", prefix="", is_last=True):
         if len(value_str) > 80:
             value_str = value_str[:77] + "..."
         lines.append(f"{indent}    └── {value_str}")
+
+    elif isinstance(data, bytes):
+        lines.append(f"{indent}    └── {type(data).__name__} (len {len(data)}): {repr(data)[:50]}")
 
     else:
         lines.append(f"{indent}    └── {type(data).__name__}: {repr(data)[:50]}")
