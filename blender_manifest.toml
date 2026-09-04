@@ -1,0 +1,55 @@
+schema_version = "1.0.0"
+
+id = "slimporterz"
+version = "0.0.1"
+name = "Second Life ImporterZ"
+tagline = "Import SL Models from viewer exports like OXP"
+maintainer = "hf"
+type = "add-on"
+website = "https://git.pixelplanet.fun"
+
+# https://docs.blender.org/manual/en/latest/advanced/extensions/tags.html
+tags = ["Import-Export"]
+
+blender_version_min = "5.2.0"
+
+license = [
+  "SPDX:GPL-3.0-or-later",
+]
+
+# https://docs.blender.org/manual/en/latest/advanced/extensions/python_wheels.html
+# wheels = [
+#   "./wheels/something.whl",
+# ]
+
+# # Optional: add-ons can list which resources they will require:
+# # * files (for access of any filesystem operations)
+# # * network (for internet access)
+# # * clipboard (to read and/or write the system clipboard)
+# # * camera (to capture photos and videos)
+# # * microphone (to capture audio)
+# #
+# # If using network, remember to also check `bpy.app.online_access`
+# # https://docs.blender.org/manual/en/latest/advanced/extensions/addons.html#internet-access
+# #
+# # For each permission it is important to also specify the reason why it is required.
+# # Keep this a single short sentence without a period (.) at the end.
+# # For longer explanations use the documentation or detail page.
+#
+[permissions]
+# https://docs.blender.org/manual/en/latest/advanced/extensions/addons.html (check for internet)
+network = "maybe we need that at some point"
+files = "Import OXP from disk"
+clipboard = "Copy generated LSL scripts to clipboard"
+
+
+# # Optional: advanced build settings.
+# # https://docs.blender.org/manual/en/latest/advanced/command_line/extension_arguments.html#command-line-args-extension-build
+# [build]
+# # These are the default build excluded patterns.
+# # You only need to edit them if you want different options.
+# paths_exclude_pattern = [
+#   "__pycache__/",
+#   "/.git/",
+#   "/*.zip",
+# ]

@@ -1,0 +1,9 @@
+__pycache__/
+*.zip
+references/
+icons/
+*.oxp
+*.slm
+*_meshtree.txt
+*_slmtree.txt
+*_oxptree.txt
