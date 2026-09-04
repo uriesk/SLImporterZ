@@ -26,6 +26,7 @@ from . import llsdz
 
 import os
 import time
+import tempfile
 import traceback
 from bpy_extras.io_utils import ImportHelper
 import zlib
@@ -182,77 +183,79 @@ class SLIZ_IMPORT_oxp(bpy.types.Operator, ImportHelper):
 
         self._import_stage = "parsing OXP"
 
-        # OXP is zlib compressed binary llsd
-        try:
-            decompressor = zlib.decompressobj()
-            parser = llsdz.parseobj()
-            with open(self.filepath, 'rb') as f:
-                while True:
-                    chunk = f.read(131072)
-                    if not chunk:
-                        break
-                    decompressed_chunk = decompressor.decompress(chunk)
-                    if decompressed_chunk:
-                        if parser.parse(decompressed_chunk):
+        # with tempfile.TemporaryDirectory() as temp_dir:
+        # TODO: just for debugging
+        if True:
+            temp_dir = os.path.dirname(self.filepath)
+            # OXP is zlib compressed binary llsd
+            try:
+                decompressor = zlib.decompressobj()
+                parser = llsdz.parseobj(asset_folder=temp_dir)
+                with open(self.filepath, 'rb') as f:
+                    while True:
+                        chunk = f.read(131072)
+                        if not chunk:
                             break
+                        decompressed_chunk = decompressor.decompress(chunk)
+                        if decompressed_chunk:
+                            if parser.parse(decompressed_chunk):
+                                break
 
-                final_chunk = decompressor.flush()
-                if final_chunk and not parser.done:
-                    parser.parse(final_chunk)
-            oxp_data, _ = parser.flush()
+                    final_chunk = decompressor.flush()
+                    if final_chunk and not parser.done:
+                        parser.parse(final_chunk)
+                oxp_data, _ = parser.flush()
+            except zlib.error as e:
+                self._notify({'ERROR'}, f"Could not decompress file. {e}")
+                return {'CANCELLED'}
+            except llsdz.error as e:
+                self._notify({'ERROR'}, f"Could not parse llsd in file. {e}")
+                return {'CANCELLED'}
+            except Exception as e:
+                self._notify({'ERROR'}, f"Could not read file. {e}")
+                return {'CANCELLED'}
+            finally:
+                parser.destruct()
             del decompressor
             del parser
-        except zlib.error as e:
-            self._notify({'ERROR'}, f"Could not decompress file. {e}")
-            return {'CANCELLED'}
-        except llsdz.error as e:
-            self._notify({'ERROR'}, f"Could not parse llsd in file. {e}")
-            return {'CANCELLED'}
-        except Exception as e:
-            self._notify({'ERROR'}, f"Could not read file. {e}")
-            return {'CANCELLED'}
 
-        if self.create_debug_info:
-            # Print structure into debug file within same folder
-            tree_lines = []
-            tree_lines.extend(llsdz.print_tree(oxp_data))
-            tree_filepath = os.path.splitext(self.filepath)[0] + "_oxptree.txt"
-            with open(tree_filepath, 'w', encoding='utf-8') as f:
-                f.write('\n'.join(tree_lines))
+            if self.create_debug_info:
+                # Print structure into debug file within same folder
+                tree_lines = []
+                tree_lines.extend(llsdz.print_tree(oxp_data))
+                tree_filepath = os.path.splitext(self.filepath)[0] + "_oxptree.txt"
+                with open(tree_filepath, 'w', encoding='utf-8') as f:
+                    f.write('\n'.join(tree_lines))
 
-        self._import_stage = "parsing mesh in OXP"
+            self._import_stage = "parsing mesh in OXP"
 
-        amount_meshes = 0
-        amount_imported_meshes = 0
-        if "mesh_asset" in oxp_data and isinstance(oxp_data["mesh_asset"], dict):
-            mesh_assets = oxp_data.pop("mesh_asset")
-            keys = list(mesh_assets.keys())
-            for i, mesh_uuid in enumerate(keys):
-                mesh_asset = mesh_assets.pop(mesh_uuid)
-                if "data" not in mesh_asset or "type" not in mesh_asset or mesh_asset["type"] != "mesh":
-                    continue
-                amount_meshes += 1
-                slm_data = mesh_asset.pop("data")
-                print(f"Found mesh: {mesh_uuid} with length: {len(slm_data)}");
+            amount_meshes = 0
+            amount_imported_meshes = 0
+            if "mesh_asset" in oxp_data and isinstance(oxp_data["mesh_asset"], dict):
+                mesh_assets = oxp_data.pop("mesh_asset")
+                keys = list(mesh_assets.keys())
+                for i, mesh_uuid in enumerate(keys):
+                    mesh_asset = mesh_assets.pop(mesh_uuid)
+                    if "filepath" not in mesh_asset or "type" not in mesh_asset or mesh_asset["type"] != "mesh":
+                        continue
+                    amount_meshes += 1
+                    slm_filepath = mesh_asset.pop("filepath")
+                    print(f"Found mesh: {slm_filepath}");
 
-                slm_filepath = os.path.splitext(self.filepath)[0] + "_" + str(amount_meshes) + ".slm"
-                if self.create_debug_info:
-                    # Write slm file
-                    with open(slm_filepath, 'wb') as f:
-                        f.write(slm_data)
+                    with open(slm_filepath, 'rb') as f:
+                        slm.import_slm(
+                            f,
+                            mesh_uuid,
+                            filepath=slm_filepath,
+                            create_debug_info=self.create_debug_info
+                        )
 
-                slm.import_slm(
-                    slm_data,
-                    filepath=slm_filepath,
-                    create_debug_info=self.create_debug_info
-                )
-
-        if amount_meshes == 0:
-            self._notify({'INFO'}, f"No mesh found in {self.filepath}")
-        elif amount_imported_meshes == 0:
-            self._notify({'INFO'}, f"No legit mesh found in {self.filepath}")
-        else:
-            self._notify({'INFO'}, f"Imported {amount_meshes} meshes from {self.filepath}")
+            if amount_meshes == 0:
+                self._notify({'INFO'}, f"No mesh found in {self.filepath}")
+            elif amount_imported_meshes == 0:
+                self._notify({'INFO'}, f"No legit mesh found in {self.filepath}")
+            else:
+                self._notify({'INFO'}, f"Imported {amount_meshes} meshes from {self.filepath}")
         return {'FINISHED'}
 
     def invoke(self, context, event):

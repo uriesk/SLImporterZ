@@ -31,7 +31,7 @@ from bpy_extras.io_utils import ImportHelper
 import zlib
 
 
-def import_slm(stream, **kwargs):
+def import_slm(stream, name, **kwargs):
     filepath = kwargs.get("filepath", None)
     create_debug_info = kwargs.get("create_debug_info", False)
 
@@ -45,6 +45,7 @@ def import_slm(stream, **kwargs):
     parser = llsdz.parseobj()
     while True:
         chunk = stream.read(1024)
+        print("got chunk " + str(len(chunk)))
         if not chunk:
             break
         if parser.parse(chunk):

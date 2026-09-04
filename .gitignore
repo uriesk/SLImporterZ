@@ -4,6 +4,7 @@ references/
 icons/
 *.oxp
 *.slm
+*.bin
 *_meshtree.txt
 *_slmtree.txt
 *_oxptree.txt

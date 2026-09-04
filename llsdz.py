@@ -19,23 +19,11 @@
 import calendar
 import datetime
 import io
+import os
 import struct
 import uuid
-from enum import Enum
-
-class PARSER_STATE(Enum):
-    BEGIN = 0
-    FETCHING = 1
-    MAP = 2
-    ARRAY = 3
-    STRING = 4
-    RAW_STRING = 5
-    DATE = 6
-    BINARY = 7
-    END = 8
 
 MAX_PARSE_DEPTH = 200
-
 _X_ORD = ord(b'x')
 _BACKSLASH_ORD = ord(b'\\')
 _DECODE_BUFF_ALLOC_SIZE = 1024
@@ -54,69 +42,86 @@ class LLSDParseError(LLSDError):
 class LLSDSerializationError(LLSDError):
     pass
 
-def _check_for_delimiter(chunk, delimiter):
-    i = 0
-    while i < len(chunk):
-        if chunk[i] == _BACKSLASH_ORD:
-            i += 1
-        elif chunk[i] == delimiter:
-            return i
-        i += 1
-    return -1
-
-# map char following escape char
-_escaped = {
-    ord(b'a'): ord(b'\a'),
-    ord(b'b'): ord(b'\b'),
-    ord(b'f'): ord(b'\f'),
-    ord(b'n'): ord(b'\n'),
-    ord(b'r'): ord(b'\r'),
-    ord(b't'): ord(b'\t'),
-    ord(b'v'): ord(b'\v'),
-}
-
-def _bytes_to_string(data):
-    buff = bytearray(len(data))
-    size = len(data)
-    insert_idx = 0
-    i = 0
-    while i < size:
-        cc = data[i]
-        if cc == _BACKSLASH_ORD:
-            i += 1
-            if i >= size:
-                break;
-            cc = data[i]
-            if cc == _X_ORD:
-                # It's a hex escape. char is the value of the two
-                # following hex nybbles.
-                i += 1
-                if i + 2 >= size:
-                    break;
-                cc = int(data[i:i+2], 16)
-                i += 1
-            else:
-                cc = _escaped.get(cc, cc)
-        buff[insert_idx] = cc
-        insert_idx += 1
-        i += 1
-    return buff[:insert_idx].decode('utf-8')
 
 class LLSDBinaryParser():
     """
         Parse llsd binary to a python object.
     """
     def __init__(self, **kwargs):
+        self.binary_size_limit = kwargs.get("binary_size_limit", None)
+        self.asset_folder = kwargs.get("asset_folder", None)
+
         self.state = 0
         self.error = None
+
+        # those variables control how much data we fetch
         self.size_to_read = 1
         self.delimiter = None
+        # offset of bytes to fast forward to
+        self.ff_to_byte = 0
+        # file writestream and path, set when fast forwarded data gets saved
+        self.asset_writestream = None
+        self.asset_filepath = None
+
         self.overhead = b''
         self._data = None
+        # order of recursive object
         self._levels = []
+        # keeps track of encountered keys
+        self._paths = []
         self._c_key = None
         # starts
         self.bytes_read = 0
+
+    # map char following escape char
+    _escaped = {
+        ord(b'a'): ord(b'\a'),
+        ord(b'b'): ord(b'\b'),
+        ord(b'f'): ord(b'\f'),
+        ord(b'n'): ord(b'\n'),
+        ord(b'r'): ord(b'\r'),
+        ord(b't'): ord(b'\t'),
+        ord(b'v'): ord(b'\v'),
+    }
+
+    @staticmethod
+    def _bytes_to_string(data):
+        buff = bytearray(len(data))
+        size = len(data)
+        insert_idx = 0
+        i = 0
+        while i < size:
+            cc = data[i]
+            if cc == _BACKSLASH_ORD:
+                i += 1
+                if i >= size:
+                    break;
+                cc = data[i]
+                if cc == _X_ORD:
+                    # It's a hex escape. char is the value of the two
+                    # following hex nybbles.
+                    i += 1
+                    if i + 2 >= size:
+                        break;
+                    cc = int(data[i:i+2], 16)
+                    i += 1
+                else:
+                    cc = LLSDBinaryParser._escaped.get(cc, cc)
+            buff[insert_idx] = cc
+            insert_idx += 1
+            i += 1
+        return buff[:insert_idx].decode('utf-8')
+
+    @staticmethod
+    def _check_for_delimiter(chunk, delimiter):
+        i = 0
+        while i < len(chunk):
+            if chunk[i] == _BACKSLASH_ORD:
+                i += 1
+            elif chunk[i] == delimiter:
+                return i
+            i += 1
+        return -1
 
     """
         method called from outside to consume stream in chunks
@@ -125,7 +130,30 @@ class LLSDBinaryParser():
         if self.overhead:
             chunk = self.overhead + chunk
 
-        while self.delimiter is not None or self.size_to_read > 0:
+        while True:
+            # fast-foward
+            if self.ff_to_byte > 0:
+                if self.bytes_read + len(chunk) < self.ff_to_byte:
+                    if self.asset_writestream is not None:
+                        self.asset_writestream.write(chunk)
+                        print("write chunk to file")
+                    self.bytes_read += len(chunk)
+                    self.overhead = None
+                    return False
+                else:
+                    remaining_ff_length = self.ff_to_byte - self.bytes_read
+                    if self.asset_writestream is not None:
+                        data = chunk[:remaining_ff_length]
+                        self.asset_writestream.write(data)
+                        print("write chunk to file finish")
+                        self.asset_writestream.flush()
+                    chunk = chunk[remaining_ff_length:]
+                    self.bytes_read = self.ff_to_byte
+                    self.ff_to_byte = 0
+                    # announce that we are done by passing empty bytes
+                    if not self._parse(b''):
+                        continue;
+
             # read specific amount of bytes
             if self.size_to_read > 0:
                 if len(chunk) < self.size_to_read:
@@ -135,13 +163,12 @@ class LLSDBinaryParser():
                     data = chunk[:self.size_to_read]
                     chunk = chunk[self.size_to_read:]
                     self.size_to_read = 0
-                    if self._parse(data):
-                        self.done = True
-                        return True
+                    if not self._parse(data):
+                        continue
 
             # read till delimiter
             if self.delimiter is not None:
-                i = _check_for_delimiter(chunk)
+                i = LLSDBinaryParser._check_for_delimiter(chunk)
                 if i < 0:
                     self.overhead = chunk
                     return False
@@ -149,25 +176,29 @@ class LLSDBinaryParser():
                     data = chunk[:i]
                     chunk = chunk[i+1:]
                     self.delimiter = None
-                    if self._parse(data):
-                        self.done = True
-                        return True
+                    if not self._parse(data):
+                        continue
+            break
         self.done = True
+        self.overhead = None
         return True
 
     """
-        finalizing parsing
+        finalizing parsing, parser is theoretically still usable after this
     """
     def flush(self):
-        finished = self.parse(b'')
-        if not finished:
+        if not self.parse(b''):
             raise LLSDParseError("Data incomplete")
         return self._data, self.bytes_read
 
+    def destruct(self):
+        if self.asset_writestream:
+            self.asset_writestream.close()
+            self.asset_writestream = None
+            self.asset_filepath = None
+
     def _parse(self, data):
         value = None
-        if len(data) == 1:
-            print("op: " + str(ord(data)))
         self.bytes_read += len(data)
         match self.state:
             case 0: # outside
@@ -218,6 +249,7 @@ class LLSDBinaryParser():
                     case 93:
                         # ']' array closes
                         self._levels.pop()
+                        self._paths.pop()
                         if not self._levels:
                             return True
                         else:
@@ -243,7 +275,7 @@ class LLSDBinaryParser():
                     value = ""
             case 3:
                 # string
-                value = _bytes_to_string(data)
+                value = LLSDBinaryParser._bytes_to_string(data)
             case 4:
                 # real number
                 value = struct.unpack("!d", data)[0]
@@ -261,9 +293,27 @@ class LLSDBinaryParser():
                 self.size_to_read = struct.unpack("!i", data)[0]
                 if self.size_to_read == 0:
                     value = b''
+                elif self.asset_folder is not None and self._c_key == "data" and len(self._paths) >= 2 and self._paths[-2] in ("asset", "mesh_asset"):
+                    # store asset file if possible
+                    # { mesh_asset: { uuid: { data, description, name, type }, ... } }
+                    asset_uuid = self._paths[-1]
+                    self.asset_filepath = os.path.join(self.asset_folder, asset_uuid + ".bin")
+                    self.asset_writestream = open(self.asset_filepath, "wb")
+                    self.ff_to_byte = self.bytes_read + self.size_to_read
+                    self.size_to_read = 0
+                elif self.binary_size_limit is not None and self.binary_size_limit < self.size_to_read:
+                    self.ff_to_byte = self.bytes_read + self.size_to_read
+                    self.size_to_read = 0
             case 8:
                 # binary
-                value = data
+                if self.asset_filepath:
+                    self._c_key = "filepath"
+                    value = self.asset_filepath
+                    self.asset_writestream.close()
+                    self.asset_writestream = None
+                    self.asset_filepath = None
+                else:
+                    value = data
             case 9:
                 # map
                 # we ignore its length, which we would have fetched here
@@ -285,6 +335,7 @@ class LLSDBinaryParser():
                         # '}' map closes
                         print("close dict")
                         self._levels.pop()
+                        self._paths.pop()
                         if not self._levels:
                             return True
                         else:
@@ -305,33 +356,31 @@ class LLSDBinaryParser():
                 # key in map
                 self.state = 0
                 self.size_to_read = 1
-                self._c_key = _bytes_to_string(data)
-                print("got key " + self._c_key)
+                self._c_key = LLSDBinaryParser._bytes_to_string(data)
             case 23:
                 # array
                 # we ignore its length, which we would have fetched here
                 value = []
 
         if value is not None:
-            print("value: " + type(value).__name__)
+            c_key = self._c_key
+
             if not self._levels:
                 self._data = value
                 if not isinstance(value, dict) and not isinstance(value, list):
                     return True
             else:
                 level = self._levels[-1]
-                if isinstance(level, dict):
-                    # dict
-                    print("add " + self._c_key + " to dic of " + type(value).__name__)
-                    level[self._c_key] = value
-                    self._c_key = None
-                else:
+                if c_key is None:
                     # list
-                    print("add to array " + type(value).__name__)
                     level.append(value)
+                else:
+                    # dict
+                    level[c_key] = value
+                    self._c_key = None
 
             if isinstance(value, dict) or isinstance(value, list):
-                print("added dict or map")
+                self._paths.append((c_key or ".") if self._paths else "/")
                 self._levels.append(value)
                 if len(self._levels) > MAX_PARSE_DEPTH:
                     raise LLSDParseError("Parse depth exceeded maximum") 
