@@ -18,9 +18,6 @@
 
 import bpy
 
-# for reading OXP files (zlib compressed binary LLSD format)
-# https://wiki.secondlife.com/wiki/LLSD
-# reference implementation: https://github.com/secondlife/python-llsd
 from . import llsdz
 
 import os
@@ -36,7 +33,7 @@ from mathutils import Vector
 def import_lod_mesh(lod_data, name, **kwargs):
     if not lod_data:
         return
-    collection_name = kwargs.get("collection_name", "")
+    collection = kwargs.get("collection", None)
     custom_properties = kwargs.get("custom_properties", None)
     # lod_data:
     #  [{
@@ -174,14 +171,10 @@ def import_lod_mesh(lod_data, name, **kwargs):
     mesh.validate(clean_customdata=False)
     obj.location = (0, 0, 0)
     # assign to collection
-    if collection_name:
-        collection = bpy.data.collections.get(collection_name)
-        if collection is None:
-            collection = bpy.data.collections.new(collection_name)
-            bpy.context.scene.collection.children.link(collection)
+    if collection is not None:
         collection.objects.link(obj)
     else:
-        bpy.context.collection.objects.link(obj)
+        bpy.context.scene.collection.objects.link(obj)
 
 
 def import_slm(stream, name, **kwargs):
@@ -189,6 +182,7 @@ def import_slm(stream, name, **kwargs):
     create_debug_info = kwargs.get("create_debug_info", False)
     extract_lods = kwargs.get("extract_lods", False)
     custom_properties = kwargs.get("custom_properties", None)
+    collection_name = kwargs.get("collection_name", None)
 
     # create stream if its not one, stream needs to be seekable
     if isinstance(stream, bytes):
@@ -244,6 +238,7 @@ def import_slm(stream, name, **kwargs):
             del parser
 
             suffix = f"_{type_name}" if type_name else ""
+            prefix = f"{type_name}_" if type_name else ""
 
             if create_debug_info and filepath is not None:
                 # Print structure into debug file within same folder
@@ -253,18 +248,28 @@ def import_slm(stream, name, **kwargs):
                 with open(tree_filepath, 'w', encoding='utf-8') as f:
                     f.write('\n'.join(tree_lines))
 
+            mesh_collection_name = prefix + collection_name if collection_name else type_name
+            mesh_collection = None
+            if mesh_collection_name:
+                mesh_collection = bpy.data.collections.get(mesh_collection_name)
+                if mesh_collection is None:
+                    mesh_collection = bpy.data.collections.new(mesh_collection_name)
+                    bpy.context.scene.collection.children.link(mesh_collection)
+                    # hide if not high_lod
+                    if type_name:
+                        mesh_collection.hide_render = True
+                        mesh_collection.color_tag = "COLOR_08"
+                        for lc in bpy.context.view_layer.layer_collection.children:
+                            if lc.collection.name == mesh_collection_name:
+                                lc.hide_viewport = True
+                                break
+
             import_lod_mesh(
                 lod_data,
                 name  + suffix,
-                collection_name=type_name,
+                collection=mesh_collection,
                 custom_properties=custom_properties,
             )
-
-    if extract_lods:
-        for type_name in ("LOD2", "LOD1", "LOD0"):
-            collection = bpy.data.collections.get(type_name)
-            collection.hide_viewport = True
-            collection.hide_render = True
 
 class SLIZ_IMPORT_slm(bpy.types.Operator, ImportHelper):
     """Import one or more SLM (.slm) files"""

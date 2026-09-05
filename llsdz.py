@@ -136,7 +136,6 @@ class LLSDBinaryParser():
                 if self.bytes_read + len(chunk) < self.ff_to_byte:
                     if self.asset_writestream is not None:
                         self.asset_writestream.write(chunk)
-                        print("write chunk to file")
                     self.bytes_read += len(chunk)
                     self.overhead = None
                     return False
@@ -145,7 +144,6 @@ class LLSDBinaryParser():
                     if self.asset_writestream is not None:
                         data = chunk[:remaining_ff_length]
                         self.asset_writestream.write(data)
-                        print("write chunk to file finish")
                         self.asset_writestream.flush()
                     chunk = chunk[remaining_ff_length:]
                     self.bytes_read = self.ff_to_byte
@@ -187,7 +185,8 @@ class LLSDBinaryParser():
         finalizing parsing, parser is theoretically still usable after this
     """
     def flush(self):
-        if not self.parse(b''):
+        finished = self.parse(b'')
+        if not finished:
             raise LLSDParseError("Data incomplete")
         return self._data, self.bytes_read
 
@@ -239,7 +238,6 @@ class LLSDBinaryParser():
                         self.size_to_read = 4
                     case 123:
                         # '{' = map
-                        print("map opens")
                         self.state = 9
                         self.size_to_read = 4
                     case 91:
@@ -270,7 +268,6 @@ class LLSDBinaryParser():
                 # size of string
                 self.state = 3
                 self.size_to_read = struct.unpack("!i", data)[0]
-                print("got size: " + str(self.size_to_read))
                 if self.size_to_read == 0:
                     value = ""
             case 3:
@@ -284,7 +281,6 @@ class LLSDBinaryParser():
                 value = uuid.UUID(bytes=data)
             case 6:
                 # date
-                print("parse date: " + str(len(data)))
                 timestamp = struct.unpack("<d", data)[0]
                 value = datetime.datetime.utcfromtimestamp(timestamp)
             case 7:
@@ -318,7 +314,6 @@ class LLSDBinaryParser():
                 # map
                 # we ignore its length, which we would have fetched here
                 value = {}
-                print("got map length " + str(struct.unpack("!i", data)[0]))
             case 20:
                 # map key format
                 ord_key = ord(data)
@@ -333,7 +328,6 @@ class LLSDBinaryParser():
                         self.delimiter = ord_key
                     case 125:
                         # '}' map closes
-                        print("close dict")
                         self._levels.pop()
                         self._paths.pop()
                         if not self._levels:
@@ -396,7 +390,6 @@ class LLSDBinaryParser():
         return False
 
 def parse_binary(something, **kwargs):
-    print("parse")
     if isinstance(something, bytes):
         something = io.BytesIO(something)
 
