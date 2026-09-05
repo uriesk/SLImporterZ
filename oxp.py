@@ -34,6 +34,7 @@ class OXPParser():
         self.create_debug_info = kwargs.get("create_debug_info", False)
         self.extract_lods = kwargs.get("extract_lods", False)
         self.create_collections = kwargs.get("create_collections", True)
+        self.temp_dir = None
         self.oxp_data = None
         self.filepath = None
         self.amount_imported_meshes = 0
@@ -80,12 +81,12 @@ class OXPParser():
         if self.oxp_data is None or not mesh_uuid:
             return None
         mesh_uuid = str(mesh_uuid)
-        prims = self.oxp_data.get("prim", None)
+        prims = self.oxp_data.get("prim")
         if not isinstance(prims, dict):
             return None
 
         for prim in prims.values():
-            mesh = prim.get("mesh", None)
+            mesh = prim.get("mesh")
             # allow different ways of definign the uuid of the mesh in a prim
             if (isinstance(mesh, str) and mesh == mesh_uuid) or (type(mesh).__name__ == "UUID" and str(mesh) == mesh_uuid):
                 return prim
@@ -98,10 +99,98 @@ class OXPParser():
     def get_prim_by_uuid(self, prim_uuid):
         if self.oxp_data is None or not prim_uuid:
             return None
-        prims = self.oxp_data.get("prim", None)
+        prims = self.oxp_data.get("prim")
         if not isinstance(prims, dict):
             return None
-        return prims.get(str(prim_uuid), None)
+        return prims.get(str(prim_uuid))
+
+    def get_texture(self, uuid, name=None):
+        if not uuid or self.oxp_data is None:
+            return None
+        if type(uuid).__name__ == "UUID":
+            uuid = str(uuid)
+        if uuid == "00000000-0000-0000-0000-000000000000":
+            return None
+        # search in existing images first
+        for image in bpy.data.images:
+            if image.get("sl_uuid") == uuid:
+                return image
+        # load image
+        assets = self.oxp_data.get("asset")
+        if not isinstance(assets, dict):
+            return None
+        texture_asset = assets[uuid]
+        if not isinstance(texture_asset, dict) or texture_asset.get("type") != "texture":
+            return None
+        filepath = texture_asset.get("filepath")
+        if not filepath or not os.path.exists(filepath):
+            return None
+        image = bpy.data.images.load(filepath)
+        image["sl_uuid"] = uuid
+        image.pack()
+        if name:
+            image.name = name
+        return image
+
+    def _create_materils_for_prim(self, materials_data, textures_data, name="slmat"):
+        materials = []
+        if not materials_data or not textures_data or len(materials_data) != len(textures_data):
+            return materials
+
+        for i in range(len(materials_data)):
+            material_name = f"{name}{i}"
+            material_data = materials_data[i]
+            texture_data = textures_data[i]
+            normal_texture = self.get_texture(material_data.get("NormMap"), material_name + "_n")
+            specular_texture = self.get_texture(material_data.get("SpecMap"), material_name + "_s")
+            color_texture = self.get_texture(texture_data.get("imageid"), material_name)
+            if not color_texture:
+                continue
+
+            # create material
+            mat = bpy.data.materials.new(material_name)
+            mat.use_nodes = True
+            nodes = mat.node_tree.nodes
+            links = mat.node_tree.links
+            # create basic nodes
+            nodes.clear()
+            output = nodes.new("ShaderNodeOutputMaterial")
+            principled = nodes.new("ShaderNodeBsdfPrincipled")
+            output.location = (300, 0)
+            principled.location = (0, 0)
+            # Link main output
+            links.new(principled.outputs["BSDF"], output.inputs["Surface"])
+
+            tex_node = nodes.new("ShaderNodeTexImage")
+            tex_node.image = color_texture
+            links.new(tex_node.outputs["Color"], principled.inputs["Base Color"])
+            if color_texture.depth == 32: 
+                links.new(tex_node.outputs["Alpha"], principled.inputs["Alpha"])
+            tex_node.location = (-300, 300)
+
+            if normal_texture:
+                normal_tex = nodes.new("ShaderNodeTexImage")
+                normal_tex.image = normal_texture
+                normal_tex.image.colorspace_settings.name = 'Non-Color'
+                normal_map = nodes.new("ShaderNodeNormalMap")
+                links.new(normal_tex.outputs["Color"], normal_map.inputs["Color"])
+                links.new(normal_map.outputs["Normal"], principled.inputs["Normal"])
+                normal_tex.location = (-300, -100)
+                normal_map.location = (-50, -100)
+
+            if specular_texture:
+                spec_tex = nodes.new("ShaderNodeTexImage")
+                spec_tex.image = specular_texture
+                spec_tex.image.colorspace_settings.name = 'Non-Color'
+                invert = nodes.new("ShaderNodeInvert")
+                links.new(spec_tex.outputs["Color"], invert.inputs["Color"])
+                # specular is inverted roughness
+                links.new(invert.outputs["Color"], principled.inputs["Roughness"])
+                spec_tex.location = (-300, -400)
+                invert.location = (-50, -400)
+
+            materials.append(mat)
+        return materials
 
     def _parse_oxp_data(self):
         if self.oxp_data is None:
@@ -114,40 +203,50 @@ class OXPParser():
             tree_filepath = os.path.splitext(self.filepath)[0] + "_oxptree.txt"
             with open(tree_filepath, 'w', encoding='utf-8') as f:
                 f.write('\n'.join(tree_lines))
-
         self._parse_meshes_in_oxp_data()
 
     def _parse_meshes_in_oxp_data(self):
-        mesh_assets = self.oxp_data.get("mesh_asset", None)
+        # all assets within "mesh_asset" are considered meshes
+        # and all "type": "mesh" assets in "asset"
+        mesh_assets = self.oxp_data.get("mesh_asset")
+        assets = self.oxp_data.get("asset")
         if not isinstance(mesh_assets, dict):
-            print("No mesh assets")
-            return
+            mesh_assets = {}
+        if isinstance(assets, dict):
+            for uuid, asset in self.oxp_data.get("asset", {}).items():
+                if "type" in asset and asset["type"] == "mesh":
+                    mesh_assets[uuid] = asset
 
         for mesh_uuid, mesh_asset in mesh_assets.items():
-            slm_filepath = mesh_asset.get("filepath", None)
-            if not slm_filepath or "type" not in mesh_asset or mesh_asset["type"] != "mesh":
+            slm_filepath = mesh_asset.get("filepath")
+            if not slm_filepath:
                 continue
             self.amount_meshes += 1
             print(f"Found mesh {mesh_uuid}: {slm_filepath}")
 
             prim_data = self.get_prim_to_mesh_uuid(mesh_uuid)
             if prim_data is None:
-                print("no prim data")
                 continue
-            name = prim_data.get("name", mesh_uuid)
+            name = prim_data.get("name")
+            if not name:
+                name = mesh_uuid
 
             # collection we put the mesh into
             collection_name = None
+            # get parent_uuid (if in linkset)
+            parent_uuid = prim_data.get("parent")
+            if parent_uuid:
+                parent_uuid = str(parent_uuid)
+
             if self.create_collections:
                 collection_name = name
-                if "parent" in prim_data:
-                    parent_uuid = prim_data["parent"]
+                if parent_uuid:
                     parent_data = self.get_prim_by_uuid(parent_uuid)
                     if parent_data is not None:
                         collection_name = parent_data.get("name", parent_uuid)
 
             with open(slm_filepath, 'rb') as f:
-                slm.import_slm(
+                imported_mesh_objects = slm.import_slm(
                     f,
                     name,
                     filepath=slm_filepath,
@@ -156,6 +255,27 @@ class OXPParser():
                     custom_properties={ "sl_uuid": mesh_uuid },
                     collection_name=collection_name
                 )
+
+            # apply data do mesh
+            prim_scale = prim_data.get("scale", [1.0, 1.0, 1.0])
+            prim_position = prim_data.get("position", [0.0, 0.0, 0.0])
+            prim_rotation = prim_data.get("rotation", [0.0, 0.0, 0.0, 1.0])
+            materials = self._create_materils_for_prim(
+                prim_data.get("materials"),
+                prim_data.get("texture"),
+                name,
+            )
+            for obj in imported_mesh_objects:
+                obj.scale = (prim_scale[0], prim_scale[1], prim_scale[2])
+                if parent_uuid:
+                    # If we are a child in a linkset, positions are relative to
+                    # parent so we may apply them
+                    obj.location = (prim_position[0], prim_position[1], prim_position[2])
+                    obj.rotation_mode = 'QUATERNION'
+                    obj.rotation_quaternion = (prim_rotation[3], prim_rotation[0], prim_rotation[1], prim_rotation[2])
+                # apply materials
+                for i, material in enumerate(materials):
+                    obj.data.materials[i] = material
 
 class SLIZ_IMPORT_oxp(bpy.types.Operator, ImportHelper):
     """Import one or more OXP (.oxp) files"""
@@ -322,6 +442,7 @@ class SLIZ_IMPORT_oxp(bpy.types.Operator, ImportHelper):
         try:
             amount_imported_meshes, amount_meshes = oxp_parser.parse_from_file(self.filepath)
         except Exception as e:
+            raise e
             self._notify({'ERROR'}, str(e))
             return {'CANCELLED'}
 

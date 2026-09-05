@@ -42,14 +42,19 @@ class LLSDParseError(LLSDError):
 class LLSDSerializationError(LLSDError):
     pass
 
+def path_join(trusted_path, filename):
+    basename = os.path.basename(filename)
+    if not basename:
+        raise AttributeError("No basename")
+    return os.path.join(trusted_path, basename)
 
 class LLSDBinaryParser():
     """
         Parse llsd binary to a python object.
     """
     def __init__(self, **kwargs):
-        self.binary_size_limit = kwargs.get("binary_size_limit", None)
-        self.asset_folder = kwargs.get("asset_folder", None)
+        self.binary_size_limit = kwargs.get("binary_size_limit")
+        self.asset_folder = kwargs.get("asset_folder")
 
         self.state = 0
         self.error = None
@@ -220,15 +225,15 @@ class LLSDBinaryParser():
                 if "type" in asset_data:
                     match asset_data["type"]:
                         case "texture":
-                            target_filepath = os.path.join(self.asset_folder, uuid + ".jp2")
+                            target_filepath = path_join(self.asset_folder, uuid + ".jp2")
                             break
                         case "lsltext":
-                            target_filepath = os.path.join(self.asset_folder, uuid + ".lsl")
+                            target_filepath = path_join(self.asset_folder, uuid + ".lsl")
                             break
                         case "mesh":
-                            target_filepath = os.path.join(self.asset_folder, uuid + ".slm")
+                            target_filepath = path_join(self.asset_folder, uuid + ".slm")
                             break
-            if target_filepath is None or os.path.exists(target_filepath) or not os.path.exists(origin_filepath):
+            if target_filepath is None or not os.path.exists(origin_filepath):
                 continue
 
             os.rename(origin_filepath, target_filepath)
@@ -352,7 +357,7 @@ class LLSDBinaryParser():
                     # store asset file if possible
                     # { mesh_asset: { uuid: { data, description, name, type }, ... } }
                     asset_uuid = self._paths[-1]
-                    self.asset_filepath = os.path.join(self.asset_folder, asset_uuid + ".bin")
+                    self.asset_filepath = path_join(self.asset_folder, asset_uuid + ".bin")
                     self.asset_writestream = open(self.asset_filepath, "wb")
                     self.ff_to_byte = self.bytes_read + self.size_to_read
                     self.size_to_read = 0

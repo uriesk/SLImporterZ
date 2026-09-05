@@ -32,9 +32,9 @@ from mathutils import Vector
 
 def import_lod_mesh(lod_data, name, **kwargs):
     if not lod_data:
-        return
-    collection = kwargs.get("collection", None)
-    custom_properties = kwargs.get("custom_properties", None)
+        return None
+    collection = kwargs.get("collection")
+    custom_properties = kwargs.get("custom_properties")
     # lod_data:
     #  [{
     #    Normal,
@@ -93,12 +93,14 @@ def import_lod_mesh(lod_data, name, **kwargs):
 
         face_tirangle_offsets.append(len(triangles))
         face_vertices_offsets.append(len(vertices))
+    if not vertices or not triangles:
+        return None
     mesh = bpy.data.meshes.new(name)
     mesh.from_pydata(vertices, [], triangles)
     del vertices
     del triangles
 
-    # Assign UV
+    # assigne UV
     uv_layer = mesh.uv_layers.new(name="UVMap")
     uv_data = uv_layer.data
     for face in lod_data:
@@ -126,7 +128,7 @@ def import_lod_mesh(lod_data, name, **kwargs):
             v_float = domain[1] + (v / 65535.0) * (domain[3] - domain[1])
             uv_data[loop.index].uv = (u_float, v_float)
 
-    # Assign Normals
+    # assigne Normals
     normals = []
     for i, next_vertices_offset in enumerate(face_vertices_offsets):
         data = lod_data[i].get("Normal", None)
@@ -155,7 +157,7 @@ def import_lod_mesh(lod_data, name, **kwargs):
         for key, value in custom_properties.items():
             obj[key] = value
 
-    # Assigne Empty Material Slots
+    # assigne Empty Material Slots
     for i in range(len(face_tirangle_offsets)):
         obj.data.materials.append(None)
     if mesh.polygons:
@@ -176,8 +178,11 @@ def import_lod_mesh(lod_data, name, **kwargs):
     else:
         bpy.context.scene.collection.objects.link(obj)
 
+    return obj
+
 
 def import_slm(stream, name, **kwargs):
+    imported_meshe_objects = []
     filepath = kwargs.get("filepath", None)
     create_debug_info = kwargs.get("create_debug_info", False)
     extract_lods = kwargs.get("extract_lods", False)
@@ -264,12 +269,15 @@ def import_slm(stream, name, **kwargs):
                                 lc.hide_viewport = True
                                 break
 
-            import_lod_mesh(
+            mesh_object = import_lod_mesh(
                 lod_data,
                 name  + suffix,
                 collection=mesh_collection,
                 custom_properties=custom_properties,
             )
+            if mesh_object is not None:
+                imported_meshe_objects.append(mesh_object)
+    return imported_meshe_objects
 
 class SLIZ_IMPORT_slm(bpy.types.Operator, ImportHelper):
     """Import one or more SLM (.slm) files"""
