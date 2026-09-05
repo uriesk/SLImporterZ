@@ -27,14 +27,154 @@ import os
 import io
 import time
 import traceback
-from bpy_extras.io_utils import ImportHelper
 import zlib
+import struct
+from bpy_extras.io_utils import ImportHelper
+from mathutils import Vector
+
+
+def import_lod_mesh(lod_data, name):
+    if not lod_data:
+        return
+    # lod_data:
+    #  [{
+    #    Normal,
+    #    NormalizedScale: [x, y, z],
+    #    Position,
+    #    PositionDomain: { Max: [x, y, z], Min: [x, y, z] },
+    #    TexCoord0,
+    #    TexCoord0Domain: { Max: [u, v], Min: [u, v] },
+    #    TriangleList,
+    #  }, ...]
+    face_tirangle_offsets = []
+    # vertice offset per face, of the NEXT face
+    # i.e.: face0 has 10 vertices and face1 has 5 = [10, 15]
+    face_vertices_offsets = []
+
+    vertices = []
+    triangles = []
+    # Create Mesh out of Vertices and Triangles
+    for face in lod_data:
+        if face.get("NoGeometry", False):
+            face_tirangle_offsets.append(len(triangles))
+            face_vertices_offsets.append(len(vertices))
+            continue
+
+        if "PositionDomain" in face:
+            domain_max = face["PositionDomain"]["Max"]
+            domain_min = face["PositionDomain"]["Min"]
+        else:
+            domain_max = [0.5, 0.5, 0.5]
+            domain_min = [-0.5, -0.5, -0.5]
+        scale_x, scale_y, scale_z = face.get("NormalizedScale", [1.0, 1.0, 1.0])
+
+        vertices_offset = len(vertices)
+        data = face.get("Position", b'')
+        num_vertices = len(data) // 6
+        for i in range(num_vertices):
+            offset = i * 6
+            x = struct.unpack('<H', data[offset:offset+2])[0]
+            y = struct.unpack('<H', data[offset+2:offset+4])[0]
+            z = struct.unpack('<H', data[offset+4:offset+6])[0]
+            # Unpack from 16-bit to float
+            # Domain: [min, max] mapped to [0, 65535]
+            x_float = domain_min[0] + (x / 65535.0) * (domain_max[0] - domain_min[0]) * scale_x
+            y_float = domain_min[1] + (y / 65535.0) * (domain_max[1] - domain_min[1]) * scale_y
+            z_float = domain_min[2] + (z / 65535.0) * (domain_max[2] - domain_min[2]) * scale_z
+            vertices.append(Vector((x_float, y_float, z_float)))
+
+        data = face.get("TriangleList", b'')
+        num_indices = len(data) // 2
+        for i in range(0, num_indices, 3):
+            if i + 2 < num_indices:
+                idx1 = vertices_offset + struct.unpack('<H', data[i*2:(i+1)*2])[0]
+                idx2 = vertices_offset + struct.unpack('<H', data[(i+1)*2:(i+2)*2])[0]
+                idx3 = vertices_offset + struct.unpack('<H', data[(i+2)*2:(i+3)*2])[0]
+                triangles.append((idx1, idx2, idx3))
+
+        face_tirangle_offsets.append(len(triangles))
+        face_vertices_offsets.append(len(vertices))
+    mesh = bpy.data.meshes.new(name)
+    mesh.from_pydata(vertices, [], triangles)
+    del vertices
+    del triangles
+
+    # Assign UV
+    uv_layer = mesh.uv_layers.new(name="UVMap")
+    uv_data = uv_layer.data
+    for face in lod_data:
+        if "TexCoord0" in face and "TexCoord0Domain" in face and len(face["TexCoord0"]) == len(face["Position"]) / 6 * 4:
+            # precalculate that face UV is valid and merge its domain info
+            face["SLIZ_UV_domain"] = [
+                *face["TexCoord0Domain"]["Min"],
+                *face["TexCoord0Domain"]["Max"],
+            ]
+    for loop in mesh.loops:
+        vertex_idx = loop.vertex_index
+        face = 0
+        while face_vertices_offsets[face] <= vertex_idx:
+            vertex_idx -= face_vertices_offsets[face]
+            face += 1
+        face = lod_data[face]
+        if "SLIZ_UV_domain" in face:
+            domain = face["SLIZ_UV_domain"]
+            uv_offset = vertex_idx * 4
+            data = face["TexCoord0"]
+            u = struct.unpack('<H', data[uv_offset:uv_offset+2])[0]
+            v = struct.unpack('<H', data[uv_offset+2:uv_offset+4])[0]
+
+            u_float = domain[0] + (u / 65535.0) * (domain[2] - domain[0])
+            v_float = domain[1] + (v / 65535.0) * (domain[3] - domain[1])
+            uv_data[loop.index].uv = (u_float, v_float)
+
+    # Assign Normals
+    normals = []
+    for i, next_vertices_offset in enumerate(face_vertices_offsets):
+        data = lod_data[i].get("Normal", None)
+        num_vertices = next_vertices_offset - len(normals)
+        if data is not None and len(data) == num_vertices * 6:
+            for u in range(num_vertices):
+                offset = u * 6
+                nx = struct.unpack('<H', data[offset:offset+2])[0]
+                ny = struct.unpack('<H', data[offset+2:offset+4])[0]
+                nz = struct.unpack('<H', data[offset+4:offset+6])[0]
+
+                # Domain: [-1.0, 1.0] mapped to [0, 65535]
+                nx_float = -1.0 + (nx / 65535.0) * 2.0
+                ny_float = -1.0 + (ny / 65535.0) * 2.0
+                nz_float = -1.0 + (nz / 65535.0) * 2.0
+                normals.append(Vector((nx_float, ny_float, nz_float)))
+        else:
+            for u in range(num_vertices):
+                normals.append(Vector((0, 0, 0)))
+    mesh.normals_split_custom_set_from_vertices(normals)
+    del normals
+
+    obj = bpy.data.objects.new(mesh.name, mesh)
+
+    # Assigne Empty Material Slots
+    for i in range(len(face_tirangle_offsets)):
+        obj.data.materials.append(None)
+    if mesh.polygons:
+        current_face = 0;
+        current_threshold = face_tirangle_offsets[current_face]
+        for poly in mesh.polygons:
+            while poly.index >= current_threshold:
+                current_face += 1
+                current_threshold = face_tirangle_offsets[current_face]
+            poly.material_index = current_face
+
+    mesh.update()
+    mesh.validate(clean_customdata=False)
+    obj.location = (0, 0, 0)
+    bpy.context.collection.objects.link(obj)
 
 
 def import_slm(stream, name, **kwargs):
     filepath = kwargs.get("filepath", None)
     create_debug_info = kwargs.get("create_debug_info", False)
 
+    # create stream if its not one, stream needs to be seekable
     if isinstance(stream, bytes):
         stream = io.BytesIO(stream)
 
@@ -45,7 +185,6 @@ def import_slm(stream, name, **kwargs):
     parser = llsdz.parseobj()
     while True:
         chunk = stream.read(1024)
-        print("got chunk " + str(len(chunk)))
         if not chunk:
             break
         if parser.parse(chunk):
@@ -93,6 +232,8 @@ def import_slm(stream, name, **kwargs):
             tree_filepath = os.path.splitext(filepath)[0] + "_meshtree" + ".txt"
             with open(tree_filepath, 'w', encoding='utf-8') as f:
                 f.write('\n'.join(tree_lines))
+
+        import_lod_mesh(lod_data, name)
 
 class SLIZ_IMPORT_slm(bpy.types.Operator, ImportHelper):
     """Import one or more SLM (.slm) files"""
