@@ -186,6 +186,9 @@ class LLSDBinaryParser():
     """
     def flush(self):
         finished = self.parse(b'')
+        if self.asset_folder:
+            self.destruct()
+            self._ensure_asset_extension()
         if not finished:
             raise LLSDParseError("Data incomplete")
         return self._data, self.bytes_read
@@ -195,6 +198,62 @@ class LLSDBinaryParser():
             self.asset_writestream.close()
             self.asset_writestream = None
             self.asset_filepath = None
+
+    def _ensure_asset_extension(self):
+        # We stored assets with .bin extension, because we could not know
+        # its type during parsing.
+        # This method renames them according to the type defined somewhere
+        # within the oxp data.
+        if not self.asset_folder or not isinstance(self._data, dict):
+            return
+
+        for filename in os.listdir(self.asset_folder):
+            if not filename.endswith(".bin"):
+                continue
+            uuid = filename[:-4]
+            origin_filepath = os.path.join(self.asset_folder, filename)
+
+            asset_occurances = self._find_asset_in_data(self._data, uuid)
+
+            target_filepath = None
+            for asset_data in asset_occurances:
+                if "type" in asset_data:
+                    match asset_data["type"]:
+                        case "texture":
+                            target_filepath = os.path.join(self.asset_folder, uuid + ".jp2")
+                            break
+                        case "lsltext":
+                            target_filepath = os.path.join(self.asset_folder, uuid + ".lsl")
+                            break
+                        case "mesh":
+                            target_filepath = os.path.join(self.asset_folder, uuid + ".slm")
+                            break
+            if target_filepath is None or os.path.exists(target_filepath) or not os.path.exists(origin_filepath):
+                continue
+
+            os.rename(origin_filepath, target_filepath)
+            for asset_data in asset_occurances:
+                asset_data["filepath"] = target_filepath
+
+    def _find_asset_in_data(self, data, uuid):
+        # find all orrucances of { uuid: { filepath }} where the filepath
+        # matches the asset_folder and uuid filename
+        occurances = []
+        if isinstance(data, dict):
+            if uuid in data:
+                candidate = data[uuid]
+                if isinstance(candidate, dict) and "filepath" in candidate and candidate["filepath"].startswith(os.path.join(self.asset_folder, uuid)):
+                    occurances.append(candidate)
+            for value in data.values():
+                result = self._find_asset_in_data(value, uuid)
+                if result:
+                    occurances.extend(result)
+        elif isinstance(data, list):
+            for item in data:
+                result = self._find_asset_in_data(item, uuid)
+                if result:
+                    occurances.extend(result)
+        return occurances
 
     def _parse(self, data):
         value = None

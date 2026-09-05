@@ -86,11 +86,13 @@ class OXPParser():
 
         for prim in prims.values():
             mesh = prim.get("mesh", None)
-            if not isinstance(mesh, dict):
-                continue
-            for value in mesh.values():
-                if str(value) == mesh_uuid:
-                    return prim
+            # allow different ways of definign the uuid of the mesh in a prim
+            if (isinstance(mesh, str) and mesh == mesh_uuid) or (type(mesh).__name__ == "UUID" and str(mesh) == mesh_uuid):
+                return prim
+            if isinstance(mesh, dict):
+                for value in mesh.values():
+                    if str(value) == mesh_uuid:
+                        return prim
         return None
 
     def get_prim_by_uuid(self, prim_uuid):
@@ -102,19 +104,21 @@ class OXPParser():
         return prims.get(str(prim_uuid), None)
 
     def _parse_oxp_data(self):
-        oxp_data = self.oxp_data
-        if oxp_data is None:
+        if self.oxp_data is None:
             return
 
         if self.create_debug_info:
             # Print structure into debug file within same folder
             tree_lines = []
-            tree_lines.extend(llsdz.print_tree(oxp_data))
+            tree_lines.extend(llsdz.print_tree(self.oxp_data))
             tree_filepath = os.path.splitext(self.filepath)[0] + "_oxptree.txt"
             with open(tree_filepath, 'w', encoding='utf-8') as f:
                 f.write('\n'.join(tree_lines))
 
-        mesh_assets = oxp_data.get("mesh_asset", None)
+        self._parse_meshes_in_oxp_data()
+
+    def _parse_meshes_in_oxp_data(self):
+        mesh_assets = self.oxp_data.get("mesh_asset", None)
         if not isinstance(mesh_assets, dict):
             print("No mesh assets")
             return
@@ -169,24 +173,17 @@ class SLIZ_IMPORT_oxp(bpy.types.Operator, ImportHelper):
         subtype='DIR_PATH',
         options={'HIDDEN', 'SKIP_SAVE'},
     )
-    batch_create_collections: bpy.props.BoolProperty(
-        name="Collection per File",
+    create_collections: bpy.props.BoolProperty(
+        name="Create Collection per Linkset",
         description=(
-            "Please each OXP in its own collection"
+            "Create a Collection for every imported Linkset"
         ),
-        default=True,
+        default=False,
     )
     extract_lods: bpy.props.BoolProperty(
         name="Load all LOD levels",
         description=(
             "Extracts all LOD level"
-        ),
-        default=False,
-    )
-    create_collections: bpy.props.BoolProperty(
-        name="Create Collection",
-        description=(
-            "Create Collections per imported Linkset"
         ),
         default=False,
     )
