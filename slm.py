@@ -33,9 +33,11 @@ from bpy_extras.io_utils import ImportHelper
 from mathutils import Vector
 
 
-def import_lod_mesh(lod_data, name):
+def import_lod_mesh(lod_data, name, **kwargs):
     if not lod_data:
         return
+    collection_name = kwargs.get("collection_name", "")
+    custom_properties = kwargs.get("custom_properties", None)
     # lod_data:
     #  [{
     #    Normal,
@@ -151,6 +153,10 @@ def import_lod_mesh(lod_data, name):
     del normals
 
     obj = bpy.data.objects.new(mesh.name, mesh)
+    # add custom properties if we have some
+    if custom_properties:
+        for key, value in custom_properties.items():
+            obj[key] = value
 
     # Assigne Empty Material Slots
     for i in range(len(face_tirangle_offsets)):
@@ -167,12 +173,22 @@ def import_lod_mesh(lod_data, name):
     mesh.update()
     mesh.validate(clean_customdata=False)
     obj.location = (0, 0, 0)
-    bpy.context.collection.objects.link(obj)
+    # assign to collection
+    if collection_name:
+        collection = bpy.data.collections.get(collection_name)
+        if collection is None:
+            collection = bpy.data.collections.new(collection_name)
+            bpy.context.scene.collection.children.link(collection)
+        collection.objects.link(obj)
+    else:
+        bpy.context.collection.objects.link(obj)
 
 
 def import_slm(stream, name, **kwargs):
     filepath = kwargs.get("filepath", None)
     create_debug_info = kwargs.get("create_debug_info", False)
+    extract_lods = kwargs.get("extract_lods", False)
+    custom_properties = kwargs.get("custom_properties", None)
 
     # create stream if its not one, stream needs to be seekable
     if isinstance(stream, bytes):
@@ -199,41 +215,56 @@ def import_slm(stream, name, **kwargs):
         with open(tree_filepath, 'w', encoding='utf-8') as f:
             f.write('\n'.join(tree_lines))
 
-    if "high_lod" in slm_metadata and isinstance(slm_metadata["high_lod"], dict):
-        lod_offset = start_pos + header_size + slm_metadata["high_lod"]["offset"]
-        lod_size = slm_metadata["high_lod"]["size"]
-        stream.seek(lod_offset - stream.tell(), io.SEEK_CUR)
+    for lod_name, type_name in (("high_lod", None), ("medium_lod", "LOD2"), ("low_lod", "LOD1"), ("lowest_lod", "LOD0")):
 
-        decompressor = zlib.decompressobj()
-        parser = llsdz.parseobj()
-        size_left = lod_size
-        while size_left > 0:
-            chunk_size = min(131072, size_left)
-            chunk = stream.read(chunk_size)
-            if not chunk:
-                break
-            size_left -= chunk_size
-            decompressed_chunk = decompressor.decompress(chunk)
-            if decompressed_chunk:
-                if parser.parse(decompressed_chunk):
+        if lod_name in slm_metadata and (extract_lods or lod_name == "high_lod") and isinstance(slm_metadata[lod_name], dict):
+            lod_offset = start_pos + header_size + slm_metadata[lod_name]["offset"]
+            lod_size = slm_metadata[lod_name]["size"]
+            stream.seek(lod_offset - stream.tell(), io.SEEK_CUR)
+
+            decompressor = zlib.decompressobj()
+            parser = llsdz.parseobj()
+            size_left = lod_size
+            while size_left > 0:
+                chunk_size = min(131072, size_left)
+                chunk = stream.read(chunk_size)
+                if not chunk:
                     break
-    
-        final_chunk = decompressor.flush()
-        if final_chunk and not parser.done:
-            parser.parse(final_chunk)
-        lod_data, _ = parser.flush()
-        del decompressor
-        del parser
+                size_left -= chunk_size
+                decompressed_chunk = decompressor.decompress(chunk)
+                if decompressed_chunk:
+                    if parser.parse(decompressed_chunk):
+                        break
+        
+            final_chunk = decompressor.flush()
+            if final_chunk and not parser.done:
+                parser.parse(final_chunk)
+            lod_data, _ = parser.flush()
+            del decompressor
+            del parser
 
-        if create_debug_info and filepath is not None:
-            # Print structure into debug file within same folder
-            tree_lines = []
-            tree_lines.extend(llsdz.print_tree(lod_data))
-            tree_filepath = os.path.splitext(filepath)[0] + "_meshtree" + ".txt"
-            with open(tree_filepath, 'w', encoding='utf-8') as f:
-                f.write('\n'.join(tree_lines))
+            suffix = f"_{type_name}" if type_name else ""
 
-        import_lod_mesh(lod_data, name)
+            if create_debug_info and filepath is not None:
+                # Print structure into debug file within same folder
+                tree_lines = []
+                tree_lines.extend(llsdz.print_tree(lod_data))
+                tree_filepath = os.path.splitext(filepath)[0] + suffix + "_meshtree" + ".txt"
+                with open(tree_filepath, 'w', encoding='utf-8') as f:
+                    f.write('\n'.join(tree_lines))
+
+            import_lod_mesh(
+                lod_data,
+                name  + suffix,
+                collection_name=type_name,
+                custom_properties=custom_properties,
+            )
+
+    if extract_lods:
+        for type_name in ("LOD2", "LOD1", "LOD0"):
+            collection = bpy.data.collections.get(type_name)
+            collection.hide_viewport = True
+            collection.hide_render = True
 
 class SLIZ_IMPORT_slm(bpy.types.Operator, ImportHelper):
     """Import one or more SLM (.slm) files"""

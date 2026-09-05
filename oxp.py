@@ -55,6 +55,13 @@ class SLIZ_IMPORT_oxp(bpy.types.Operator, ImportHelper):
         ),
         default=True,
     )
+    extract_lods: bpy.props.BoolProperty(
+        name="Load all LOD levels",
+        description=(
+            "Extracts all LOD level"
+        ),
+        default=False,
+    )
     create_debug_info: bpy.props.BoolProperty(
         name="Create Debug Info",
         description=(
@@ -240,14 +247,17 @@ class SLIZ_IMPORT_oxp(bpy.types.Operator, ImportHelper):
                         continue
                     amount_meshes += 1
                     slm_filepath = mesh_asset.pop("filepath")
-                    print(f"Found mesh: {slm_filepath}");
+                    print(f"Found mesh: {slm_filepath}")
 
                     with open(slm_filepath, 'rb') as f:
                         slm.import_slm(
                             f,
-                            mesh_uuid,
+                            # TODO choose better name
+                            "watch",
                             filepath=slm_filepath,
-                            create_debug_info=self.create_debug_info
+                            create_debug_info=self.create_debug_info,
+                            extract_lods=self.extract_lods,
+                            custom_properties={ "sl_uuid": mesh_uuid }
                         )
 
             if amount_meshes == 0:
