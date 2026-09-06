@@ -21,6 +21,7 @@ import datetime
 import io
 import os
 import struct
+import json
 import uuid
 
 MAX_PARSE_DEPTH = 200
@@ -342,7 +343,7 @@ class LLSDBinaryParser():
                 value = struct.unpack("!d", data)[0]
             case 5:
                 # uuid
-                value = uuid.UUID(bytes=data)
+                value = str(uuid.UUID(bytes=data))
             case 6:
                 # date
                 timestamp = struct.unpack("<d", data)[0]
@@ -520,9 +521,21 @@ def print_tree(data, indent="", prefix="", is_last=True):
 
     elif isinstance(data, (str, int, float, bool)):
         value_str = repr(data)
-        if len(value_str) > 80:
-            value_str = value_str[:77] + "..."
-        lines.append(f"{indent}    └── {value_str}")
+        if isinstance(data, str):
+            try:
+                parsed = json.loads(data)
+                lines.append(f"{indent}    └── {type(data).__name__} (JSON):")
+                json_lines = json.dumps(parsed, indent=2).split('\n')
+                for line in json_lines:
+                    lines.append(f"{indent}        {line}")
+            except json.JSONDecodeError:
+                # Fallback if parsing fails
+                lines.append(f"{indent}        {value_str[:80]}")
+            # Pretty print the JSON
+        elif len(value_str) > 80:
+            lines.append(f"{indent}    └── {value_str[:77]}...")
+        else:
+            lines.append(f"{indent}    └── {value_str}")
 
     elif isinstance(data, bytes):
         lines.append(f"{indent}    └── {type(data).__name__} (len {len(data)}): {repr(data)[:50]}")

@@ -100,7 +100,7 @@ def import_lod_mesh(lod_data, name, **kwargs):
     del vertices
     del triangles
 
-    # assigne UV
+    # assign UV
     uv_layer = mesh.uv_layers.new(name="UVMap")
     uv_data = uv_layer.data
     for face in lod_data:
@@ -110,25 +110,29 @@ def import_lod_mesh(lod_data, name, **kwargs):
                 *face["TexCoord0Domain"]["Min"],
                 *face["TexCoord0Domain"]["Max"],
             ]
-    for loop in mesh.loops:
-        vertex_idx = loop.vertex_index
-        face = 0
-        while face_vertices_offsets[face] <= vertex_idx:
-            vertex_idx -= face_vertices_offsets[face]
-            face += 1
-        face = lod_data[face]
-        if "SLIZ_UV_domain" in face:
-            domain = face["SLIZ_UV_domain"]
-            uv_offset = vertex_idx * 4
-            data = face["TexCoord0"]
-            u = struct.unpack('<H', data[uv_offset:uv_offset+2])[0]
-            v = struct.unpack('<H', data[uv_offset+2:uv_offset+4])[0]
+    try:
+        for loop in mesh.loops:
+            vertex_idx = loop.vertex_index
+            face = 0
+            while face_vertices_offsets[face] <= vertex_idx:
+                vertex_idx -= face_vertices_offsets[face]
+                face += 1
+            face = lod_data[face]
+            if "SLIZ_UV_domain" in face:
+                domain = face["SLIZ_UV_domain"]
+                uv_offset = vertex_idx * 4
+                data = face["TexCoord0"]
+                u = struct.unpack('<H', data[uv_offset:uv_offset+2])[0]
+                v = struct.unpack('<H', data[uv_offset+2:uv_offset+4])[0]
 
-            u_float = domain[0] + (u / 65535.0) * (domain[2] - domain[0])
-            v_float = domain[1] + (v / 65535.0) * (domain[3] - domain[1])
-            uv_data[loop.index].uv = (u_float, v_float)
+                u_float = domain[0] + (u / 65535.0) * (domain[2] - domain[0])
+                v_float = domain[1] + (v / 65535.0) * (domain[3] - domain[1])
+                uv_data[loop.index].uv = (u_float, v_float)
+    except Exception as e:
+        # TODO: only for debuggins
+        num_vertices = 0
 
-    # assigne Normals
+    # assign Normals
     normals = []
     for i, next_vertices_offset in enumerate(face_vertices_offsets):
         data = lod_data[i].get("Normal", None)
@@ -157,7 +161,7 @@ def import_lod_mesh(lod_data, name, **kwargs):
         for key, value in custom_properties.items():
             obj[key] = value
 
-    # assigne Empty Material Slots
+    # assign Empty Material Slots
     for i in range(len(face_tirangle_offsets)):
         obj.data.materials.append(None)
     if mesh.polygons:

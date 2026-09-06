@@ -26,6 +26,7 @@ import time
 import tempfile
 import traceback
 from bpy_extras.io_utils import ImportHelper
+import json
 import zlib
 
 
@@ -80,7 +81,6 @@ class OXPParser():
     def get_prim_to_mesh_uuid(self, mesh_uuid):
         if self.oxp_data is None or not mesh_uuid:
             return None
-        mesh_uuid = str(mesh_uuid)
         prims = self.oxp_data.get("prim")
         if not isinstance(prims, dict):
             return None
@@ -88,11 +88,11 @@ class OXPParser():
         for prim in prims.values():
             mesh = prim.get("mesh")
             # allow different ways of definign the uuid of the mesh in a prim
-            if (isinstance(mesh, str) and mesh == mesh_uuid) or (type(mesh).__name__ == "UUID" and str(mesh) == mesh_uuid):
+            if isinstance(mesh, str) and mesh == mesh_uuid:
                 return prim
             if isinstance(mesh, dict):
                 for value in mesh.values():
-                    if str(value) == mesh_uuid:
+                    if value == mesh_uuid:
                         return prim
         return None
 
@@ -102,34 +102,39 @@ class OXPParser():
         prims = self.oxp_data.get("prim")
         if not isinstance(prims, dict):
             return None
-        return prims.get(str(prim_uuid))
+        return prims.get(prim_uuid)
 
-    def get_texture(self, uuid, name=None):
+    def get_texture(self, uuid, alternative_name=None):
         if not uuid or self.oxp_data is None:
             return None
-        if type(uuid).__name__ == "UUID":
-            uuid = str(uuid)
         if uuid == "00000000-0000-0000-0000-000000000000":
             return None
+
         # search in existing images first
         for image in bpy.data.images:
             if image.get("sl_uuid") == uuid:
                 return image
-        # load image
+
         assets = self.oxp_data.get("asset")
         if not isinstance(assets, dict):
             return None
-        texture_asset = assets[uuid]
+        texture_asset = assets.get(uuid)
         if not isinstance(texture_asset, dict) or texture_asset.get("type") != "texture":
             return None
         filepath = texture_asset.get("filepath")
         if not filepath or not os.path.exists(filepath):
             return None
+
         image = bpy.data.images.load(filepath)
         image["sl_uuid"] = uuid
-        image.pack()
+        name = texture_asset.get("name")
+        # use alternative_name if name from oxp data isn't available or an uuid
+        if not name or (len(name) == 36 and name[8] == "-"):
+            name = alternative_name
         if name:
             image.name = name
+        # store image in blend file
+        image.pack()
         return image
 
     def _create_materils_for_prim(self, materials_data, textures_data, name="slmat"):
@@ -144,8 +149,6 @@ class OXPParser():
             normal_texture = self.get_texture(material_data.get("NormMap"), material_name + "_n")
             specular_texture = self.get_texture(material_data.get("SpecMap"), material_name + "_s")
             color_texture = self.get_texture(texture_data.get("imageid"), material_name)
-            if not color_texture:
-                continue
 
             # create material
             mat = bpy.data.materials.new(material_name)
@@ -158,15 +161,28 @@ class OXPParser():
             principled = nodes.new("ShaderNodeBsdfPrincipled")
             output.location = (300, 0)
             principled.location = (0, 0)
-            # Link main output
             links.new(principled.outputs["BSDF"], output.inputs["Surface"])
+            # basic values
+            colors = texture_data.get("colors", [1.0, 1.0, 1.0, 1.0])
+            # those values can't be represented in blener fully at times
+            #mat["sl_color"] = colors
+            #mat.id_properties_ui("sl_color").update(subtype='COLOR')
+            principled.inputs["Base Color"].default_value = colors
+            mat["sl_fullbright"] = texture_data.get("fullbright", 0)
+            mat["sl_glow"] = texture_data.get("glow", 0.0)
 
-            tex_node = nodes.new("ShaderNodeTexImage")
-            tex_node.image = color_texture
-            links.new(tex_node.outputs["Color"], principled.inputs["Base Color"])
-            if color_texture.depth == 32: 
-                links.new(tex_node.outputs["Alpha"], principled.inputs["Alpha"])
-            tex_node.location = (-300, 300)
+            # PBR
+            if "gltf_override" in texture_data:
+                pbr_material = json.loads(texture_data["gltf_override"])
+                print(str(pbr_material))
+
+            if color_texture:
+                tex_node = nodes.new("ShaderNodeTexImage")
+                tex_node.image = color_texture
+                links.new(tex_node.outputs["Color"], principled.inputs["Base Color"])
+                if color_texture.depth == 32: 
+                    links.new(tex_node.outputs["Alpha"], principled.inputs["Alpha"])
+                tex_node.location = (-300, 300)
 
             if normal_texture:
                 normal_tex = nodes.new("ShaderNodeTexImage")
@@ -236,7 +252,7 @@ class OXPParser():
             # get parent_uuid (if in linkset)
             parent_uuid = prim_data.get("parent")
             if parent_uuid:
-                parent_uuid = str(parent_uuid)
+                parent_uuid = parent_uuid
 
             if self.create_collections:
                 collection_name = name
@@ -442,6 +458,7 @@ class SLIZ_IMPORT_oxp(bpy.types.Operator, ImportHelper):
         try:
             amount_imported_meshes, amount_meshes = oxp_parser.parse_from_file(self.filepath)
         except Exception as e:
+            # TODO: only for debuggins
             raise e
             self._notify({'ERROR'}, str(e))
             return {'CANCELLED'}
