@@ -28,6 +28,8 @@ if "bpy" in locals():
         importlib.reload(oxp)
     if "llsdz" in locals():
         importlib.reload(llsdz)
+    if "utils" in locals():
+        importlib.reload(utils)
 
 from . import collada
 from . import oxp

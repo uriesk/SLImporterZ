@@ -20,6 +20,7 @@ import bpy
 
 from . import slm
 from . import llsdz
+from . import utils
 
 import os
 import time
@@ -133,28 +134,213 @@ class OXPParser():
             name = alternative_name
         if name:
             image.name = name
-        # store image in blend file
         image.pack()
         return image
 
-    def _create_materils_for_prim(self, materials_data, textures_data, name="slmat"):
+    def get_text(self, uuid, alternative_name=None):
+        if not uuid or self.oxp_data is None:
+            return None
+        if uuid == "00000000-0000-0000-0000-000000000000":
+            return None
+
+        # search in existing textblocks first
+        for text in bpy.data.texts:
+            if text.get["sl_uuid"] == uuid:
+                return text
+
+        assets = self.oxp_data.get("asset")
+        if not isinstance(assets, dict):
+            return None
+        text_asset = assets.get(uuid)
+        if not isinstance(text_asset, dict):
+            return None
+        filepath = text_asset.get("filepath")
+        if not filepath or not os.path.exists(filepath):
+            return None
+
+        with open(filepath, 'r', encoding='utf-8') as f:
+            content = f.read()
+        name = text_asset.get("name")
+        # use alternative_name if name from oxp data isn't available or an uuid
+        if not name or (len(name) == 36 and name[8] == "-"):
+            name = alternative_name
+        if name:
+            image.name = name
+        text = bpy.data.texts.new(name)
+        text.write(content)
+        text.pack()
+        return text
+
+    def _get_material_from_gltf(self, gltf_data):
+        # gltf_data is a json string in gltf format with materials inside
+        try:
+            gltf_data = json.loads(gltf_data)
+            materials_data = gltf_data.get("materials", [])
+            if  len(materials_data) < 1:
+                return None
+            images_data = gltf_data.get("images")
+            textures_data = gltf_data.get("textures")
+
+            # we take the first material (in sl we only have one inside)
+            pbr_material = materials_data[0]
+            self._resolve_textures_in_gltf_material(
+                pbr_material, textures_data, images_data
+            )
+            return pbr_material
+        except Exception as e:
+            traceback.print_exc()
+            print(f"Could not parse gltf material: {e}")
+            return None
+
+    def _resolve_textures_in_gltf_material(self, data, textures_data, images_data):
+        # takes gltf_data dict and resoles textures to their uris
+        # texture keys are in the form of xxxxxTexture: { index }
+        # material -> texures -> images -> uri
+        if isinstance(data, dict):
+            for key in data.keys():
+                if key.endswith("Texture"):
+                    texture_data = data[key]
+                    if isinstance(texture_data, dict):
+                        tex_ind = texture_data.get("index")
+                        if tex_ind is not None:
+                            src_ind = textures_data[tex_ind]["source"]
+                            data[key] = images_data[src_ind]["uri"]
+            for value in data.values():
+                self._resolve_textures_in_gltf_material(value, textures_data, images_data)
+        elif isinstance(data, list):
+            for item in data:
+                self._resolve_textures_in_gltf_material(item, textures_data, images_data)
+
+    def _get_pbr_material(self, uuid):
+        print("check for material: " + uuid)
+        if not uuid or self.oxp_data is None:
+            return None
+        assets = self.oxp_data.get("asset")
+        if not isinstance(assets, dict):
+            return None
+        material_asset = assets.get(uuid)
+        if not isinstance(material_asset, dict):
+            return None
+        filepath = material_asset.get("filepath")
+        if not filepath or not os.path.exists(filepath):
+            return None
+
+        try:
+            # llsd binary file, with header and
+            # { data: gltf_json, type: "GLTF 2.0", version: 1.1}
+            llsd_parser = llsdz.parseobj()
+            with open(filepath, 'rb') as f:
+                while True:
+                    chunk = f.read(65536)
+                    if not chunk:
+                        break
+                    if llsd_parser.parse(chunk):
+                        break
+            slmat_data, _ = llsd_parser.flush()
+        except Exception as e:
+            traceback.print_exc()
+            print(f"Could not parse slmat material: {e}")
+            return None
+
+        if self.create_debug_info:
+            tree_lines = []
+            tree_lines.extend(llsdz.print_tree(slmat_data))
+            tree_filepath = os.path.splitext(filepath)[0] + "_slmattree.txt"
+            with open(tree_filepath, 'w', encoding='utf-8') as f:
+                f.write('\n'.join(tree_lines))
+
+        pbr_material = self._get_material_from_gltf(slmat_data.get("data"))
+        if pbr_material:
+            name = material_asset.get("name")
+            # set name only if its defined and not an uuid
+            if name and not (len(name) == 36 and name[8] == "-"):
+                pbr_material["sl_name"] = name
+        return pbr_material
+
+    def _add_unused_assets(self):
+        # adds assets that are not used in any mesh
+        assets = self.oxp_data.get("asset")
+        if not isinstance(assets, dict):
+            return None
+        for uuid, asset_data in assets.items():
+            asset_type = asset_data.get("type")
+            if not asset_type:
+                continue
+            name = asset_data.get("name", uuid)
+            match asset_type:
+                # those methodes only add new objects if no current one exists
+                case "texture":
+                    self.get_texture(uuid, name)
+                case "lsltext":
+                    self.get_text(uuid, name)
+
+    def _create_materials_for_prim(self, prim_data, name="slmat"):
         materials = []
-        if not materials_data or not textures_data or len(materials_data) != len(textures_data):
+        materials_data = prim_data.get("materials", [])
+        textures_data = prim_data.get("texture", [])
+
+        # PBR material that is referenced
+        # from:
+        #   { entries: [{ id: uuid, te_idx: index }, ...] }
+        # to:
+        #   { index: pbr_material }
+        pbr_render_materials = {}
+        if "render_material" in prim_data:
+            pbr_render_materials = prim_data["render_material"]
+            if isinstance(pbr_render_materials, dict):
+                entries = pbr_render_materials.get("entries")
+                if isinstance(entries, list):
+                    for pbr_material_ref in entries:
+                        if isinstance(pbr_material_ref, dict):
+                            te_idx = pbr_material_ref.get("te_idx")
+                            uuid = pbr_material_ref.get("id")
+                            if te_idx is not None and uuid:
+                                pbr_material = self._get_pbr_material(uuid)
+                                if pbr_material:
+                                    pbr_material["sl_uuid"] = uuid
+                                    pbr_render_materials[te_idx] = pbr_material
+
+        if not pbr_render_materials and not materials_data and not textures_data:
             return materials
 
-        for i in range(len(materials_data)):
+        # ensure same length
+        amount_materials = max(len(materials_data), len(textures_data))
+        if len(materials_data) < amount_materials:
+            materials_data += [None] * (amount_materials - len(materials_data))
+        if len(textures_data) < amount_materials:
+            textures_data += [None] * (amount_materials - len(textures_data))
+
+        for i in range(amount_materials):
             material_name = f"{name}{i}"
             material_data = materials_data[i]
             texture_data = textures_data[i]
-            normal_texture = self.get_texture(material_data.get("NormMap"), material_name + "_n")
-            specular_texture = self.get_texture(material_data.get("SpecMap"), material_name + "_s")
-            color_texture = self.get_texture(texture_data.get("imageid"), material_name)
+            pbr_material = pbr_render_materials.get(i)
 
             # create material
             mat = bpy.data.materials.new(material_name)
             mat.use_nodes = True
             nodes = mat.node_tree.nodes
             links = mat.node_tree.links
+
+            if "gltf_override" in texture_data:
+                gltf_override = self._get_material_from_gltf(texture_data["gltf_override"])
+                if gltf_override:
+                    pbr_material = utils.merge_dicts(pbr_material or {}, gltf_override)
+                    mat["sl_gltf_override"] = json.dumps(list(gltf_override.keys()))
+
+            # known values in pbr_material:
+            #   normalTexture: uuid
+            #   emissiveTexture: uuid
+            #   occlusionTexture: uuid
+            #   emissiveFactor: [3 float]
+            #   pbrMetallicRoughness: {
+            #     baseColorTexture: uuid
+            #     baseColorFactor: [4]
+            #     metallicFactor: float
+            #     roughnessFactor: float
+            #   }
+            #   alphaCutoff: float
+
             # create basic nodes
             nodes.clear()
             output = nodes.new("ShaderNodeOutputMaterial")
@@ -162,19 +348,50 @@ class OXPParser():
             output.location = (300, 0)
             principled.location = (0, 0)
             links.new(principled.outputs["BSDF"], output.inputs["Surface"])
-            # basic values
-            colors = texture_data.get("colors", [1.0, 1.0, 1.0, 1.0])
-            # those values can't be represented in blener fully at times
-            #mat["sl_color"] = colors
-            #mat.id_properties_ui("sl_color").update(subtype='COLOR')
-            principled.inputs["Base Color"].default_value = colors
+
+            # texture uuids
+            color_texture = self.get_texture(texture_data.get("imageid"), material_name)
+            normal_texture = self.get_texture(material_data.get("NormMap"), material_name + "_n")
+            specular_texture = self.get_texture(material_data.get("SpecMap"), material_name + "_s")
+            emissive_texture = None
+            orm_texture = None
+
+            # base values
+            base_color_tint = texture_data.get("colors", [1.0, 1.0, 1.0, 1.0])
+
+            if pbr_material:
+                pbr_metallic_roughness = pbr_material.get("pbrMetallicRoughness")
+                if isinstance(pbr_metallic_roughness, dict):
+                    color_texture = pbr_metallic_roughness.get("baseColorTexture", color_texture)
+                    base_color_tint = pbr_metallic_roughness.get("baseColorFactor", base_color_tint)
+                    if "metallicFactor" in pbr_metallic_roughness:
+                        principled.inputs["Metallic"].default_value = pbr_metallic_roughness["metallicFactor"]
+                    if "roughnessFactor" in pbr_metallic_roughness:
+                        principled.inputs["Roughness"].default_value = pbr_metallic_roughness["roughnessFactor"]
+                normal_texture = pbr_material.get("normalTexture", normal_texture)
+                orm_texture = pbr_material.get("occlusionTexture")
+                emissive_texture = pbr_material.get("emissiveTexture")
+                if "sl_uuid" in pbr_material:
+                    mat["sl_uuid"] = pbr_material["sl_uuid"]
+                if "sl_name" in pbr_material:
+                    mat.name = pbr_material["sl_name"]
+                if "emissiveFactor" in pbr_material:
+                    emission_factor = pbr_material["emissiveFactor"]
+                    if len(emission_factor) == 3:
+                        emission_factor.append(1.0)
+                    principled.inputs["Emission Color"].default_value = emission_factor
+
             mat["sl_fullbright"] = texture_data.get("fullbright", 0)
             mat["sl_glow"] = texture_data.get("glow", 0.0)
+            # TODO could multiply this on color_texture
+            principled.inputs["Base Color"].default_value = base_color_tint
 
-            # PBR
-            if "gltf_override" in texture_data:
-                pbr_material = json.loads(texture_data["gltf_override"])
-                print(str(pbr_material))
+            # uuids to image
+            color_texture = self.get_texture(color_texture, material_name)
+            normal_texture = self.get_texture(normal_texture, material_name + "_n")
+            specular_texture = self.get_texture(specular_texture, material_name + "_s")
+            emissive_texture = self.get_texture(emissive_texture, material_name + "_e")
+            orm_texture = self.get_texture(orm_texture, material_name + "_orm")
 
             if color_texture:
                 tex_node = nodes.new("ShaderNodeTexImage")
@@ -191,19 +408,43 @@ class OXPParser():
                 normal_map = nodes.new("ShaderNodeNormalMap")
                 links.new(normal_tex.outputs["Color"], normal_map.inputs["Color"])
                 links.new(normal_map.outputs["Normal"], principled.inputs["Normal"])
-                normal_tex.location = (-300, -100)
-                normal_map.location = (-50, -100)
+                normal_tex.location = (-600, -20)
+                normal_map.location = (-250, -15)
+
+            if orm_texture:
+                orm_node = nodes.new("ShaderNodeTexImage")
+                orm_node.image = orm_texture
+                orm_node.image.colorspace_settings.name = 'Non-Color'
+                orm_node.location = (-600, -300)
+                # split RGB channels
+                separate = nodes.new("ShaderNodeSeparateColor")
+                separate.location =  (-300, -260)
+                links.new(orm_node.outputs["Color"], separate.inputs["Color"])
+                links.new(separate.outputs["Green"], principled.inputs["Roughness"])
+                links.new(separate.outputs["Blue"], principled.inputs["Metallic"])
 
             if specular_texture:
                 spec_tex = nodes.new("ShaderNodeTexImage")
                 spec_tex.image = specular_texture
                 spec_tex.image.colorspace_settings.name = 'Non-Color'
+                # specular is inverted roughness
                 invert = nodes.new("ShaderNodeInvert")
                 links.new(spec_tex.outputs["Color"], invert.inputs["Color"])
-                # specular is inverted roughness
-                links.new(invert.outputs["Color"], principled.inputs["Roughness"])
-                spec_tex.location = (-300, -400)
-                invert.location = (-50, -400)
+                if orm_texture:
+                    # move it out of the way and don't connect if if orm exists
+                    spec_tex.location = (-600, -600)
+                    invert.location = (-300, -560)
+                else:
+                    spec_tex.location = (-600, -300)
+                    invert.location = (-300, -260)
+                    links.new(invert.outputs["Color"], principled.inputs["Roughness"])
+
+            if emissive_texture:
+                emissive_node = nodes.new("ShaderNodeTexImage")
+                emissive_node.image = emissive_texture
+                emissive_node.image.colorspace_settings.name = 'Non-Color'
+                emissive_node.location = (-300, -500)
+                links.new(emissive_node.outputs["Color"], principled.inputs["Emission"])
 
             materials.append(mat)
         return materials
@@ -219,7 +460,9 @@ class OXPParser():
             tree_filepath = os.path.splitext(self.filepath)[0] + "_oxptree.txt"
             with open(tree_filepath, 'w', encoding='utf-8') as f:
                 f.write('\n'.join(tree_lines))
+
         self._parse_meshes_in_oxp_data()
+        self._add_unused_assets()
 
     def _parse_meshes_in_oxp_data(self):
         # all assets within "mesh_asset" are considered meshes
@@ -276,11 +519,7 @@ class OXPParser():
             prim_scale = prim_data.get("scale", [1.0, 1.0, 1.0])
             prim_position = prim_data.get("position", [0.0, 0.0, 0.0])
             prim_rotation = prim_data.get("rotation", [0.0, 0.0, 0.0, 1.0])
-            materials = self._create_materils_for_prim(
-                prim_data.get("materials"),
-                prim_data.get("texture"),
-                name,
-            )
+            materials = self._create_materials_for_prim(prim_data, name)
             for obj in imported_mesh_objects:
                 obj.scale = (prim_scale[0], prim_scale[1], prim_scale[2])
                 if parent_uuid:

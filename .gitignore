@@ -5,8 +5,11 @@ icons/
 *.oxp
 *.slm
 *.bin
+*.slmat
 *_meshtree.txt
 *_slmtree.txt
 *_oxptree.txt
+*_slmattree.txt
 *.lsl
 *.jp2
+*-swp

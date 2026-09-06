@@ -1,2 +1,5 @@
 - Parse Physics shape when it isn't a convex hulls
-- assign materials
+- maybe a few more material properties
+- scale is off with donut
+- uv map is wrong
+- rigging

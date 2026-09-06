@@ -154,9 +154,11 @@ class LLSDBinaryParser():
                     chunk = chunk[remaining_ff_length:]
                     self.bytes_read = self.ff_to_byte
                     self.ff_to_byte = 0
-                    # announce that we are done by passing empty bytes
-                    if not self._parse(b''):
-                        continue;
+                    # if we didn't get a next command, announce that we are
+                    # done by passing empty bytes
+                    if not self.size_to_read and not self.delimiter:
+                        if not self._parse(b''):
+                            continue;
 
             # read specific amount of bytes
             if self.size_to_read > 0:
@@ -230,6 +232,9 @@ class LLSDBinaryParser():
                             break
                         case "lsltext":
                             target_filepath = path_join(self.asset_folder, uuid + ".lsl")
+                            break
+                        case "material":
+                            target_filepath = path_join(self.asset_folder, uuid + ".slmat")
                             break
                         case "mesh":
                             target_filepath = path_join(self.asset_folder, uuid + ".slm")
@@ -323,6 +328,22 @@ class LLSDBinaryParser():
                             if isinstance(level, list):
                                 self.state = 0
                                 self.size_to_read = 1
+                    case 60:
+                        # '<' header
+                        # <? LLSD/Binary ?> in either case and with possible
+                        # newlines
+                        if self._data is not None:
+                            raise LLSDParseError("Invalid data")
+                        # dont check it, just skip past
+                        self.ff_to_byte = self.bytes_read + 16
+                        self.state = 0
+                        self.size_to_read = 1
+                    case 10 | 32 | 9:
+                        # whitespace at start
+                        if self._data is not None:
+                            raise LLSDParseError("Invalid data")
+                        self.state = 0
+                        self.size_to_read = 1
                     case _:
                         raise LLSDParseError("Invalid binary token")
 
@@ -461,17 +482,12 @@ def parse_binary(something, **kwargs):
     if isinstance(something, io.IOBase):
         llsd_reader = LLSDBinaryParser(**kwargs)
 
-        chunk = something.read(65536)
-        binary_header = b'<? llsd/binary ?>'
-        if chunk.startswith(binary_header):
-            chunk = chunk[len(binary_header):]
-        finished = llsd_reader.parse(chunk)
-
-        while not finished:
+        while True:
             chunk = something.read(65536)
             if not chunk:
                 break
-            finished = llsd_reader.parse(chunk)
+            if llsd_reader.parse(chunk):
+                break
         llsd_data = llsd_reader.flush()
         return llsd_data
     else:
@@ -521,17 +537,17 @@ def print_tree(data, indent="", prefix="", is_last=True):
 
     elif isinstance(data, (str, int, float, bool)):
         value_str = repr(data)
-        if isinstance(data, str):
+        json_lines = None
+        if isinstance(data, str) and data[:1] in ("{", "["):
             try:
                 parsed = json.loads(data)
                 lines.append(f"{indent}    └── {type(data).__name__} (JSON):")
                 json_lines = json.dumps(parsed, indent=2).split('\n')
-                for line in json_lines:
-                    lines.append(f"{indent}        {line}")
             except json.JSONDecodeError:
-                # Fallback if parsing fails
-                lines.append(f"{indent}        {value_str[:80]}")
-            # Pretty print the JSON
+                pass
+        if json_lines:
+            for line in json_lines:
+                lines.append(f"{indent}        {line}")
         elif len(value_str) > 80:
             lines.append(f"{indent}    └── {value_str[:77]}...")
         else:
