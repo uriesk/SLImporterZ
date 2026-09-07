@@ -67,6 +67,7 @@ def import_lod_mesh(lod_data, name, **kwargs):
             domain_min = [-0.5, -0.5, -0.5]
         scale_x, scale_y, scale_z = face.get("NormalizedScale", [1.0, 1.0, 1.0])
 
+        # Get vertices
         vertices_offset = len(vertices)
         data = face.get("Position", b'')
         num_vertices = len(data) // 6
@@ -82,55 +83,78 @@ def import_lod_mesh(lod_data, name, **kwargs):
             z_float = domain_min[2] + (z / 65535.0) * (domain_max[2] - domain_min[2]) * scale_z
             vertices.append(Vector((x_float, y_float, z_float)))
 
+        # set SLIZ_UV_domain and SLIZ_UV_offset if uv seems legit
+        if "TexCoord0" in face and "TexCoord0Domain" in face and len(face["TexCoord0"]) == num_vertices * 4:
+            domain = [
+                *face["TexCoord0Domain"]["Min"],
+                *face["TexCoord0Domain"]["Max"],
+            ]
+            face["SLIZ_UV_domain"] = domain
+            face["SLIZ_UV_offset"] = [0, 0]
+            if domain[0] <= 0 and domain[2] <= 0:
+                face["SLIZ_UV_offset"][0] = 1
+            elif domain[0] >= 1 and domain[2] >= 1:
+                face["SLIZ_UV_offset"][0] = -1
+            if domain[1] <= 0 and domain[3] <= 0:
+                face["SLIZ_UV_offset"][1] = 1
+            elif domain[1] >= 1 and domain[3] >= 1:
+                face["SLIZ_UV_offset"][1] = -1
+
+        # Get triangles and UV
         data = face.get("TriangleList", b'')
         num_indices = len(data) // 2
         for i in range(0, num_indices, 3):
             if i + 2 < num_indices:
-                idx1 = vertices_offset + struct.unpack('<H', data[i*2:(i+1)*2])[0]
-                idx2 = vertices_offset + struct.unpack('<H', data[(i+1)*2:(i+2)*2])[0]
-                idx3 = vertices_offset + struct.unpack('<H', data[(i+2)*2:(i+3)*2])[0]
-                triangles.append((idx1, idx2, idx3))
+                idx1 = struct.unpack('<H', data[i*2:(i+1)*2])[0]
+                idx2 = struct.unpack('<H', data[(i+1)*2:(i+2)*2])[0]
+                idx3 = struct.unpack('<H', data[(i+2)*2:(i+3)*2])[0]
+                triangles.append((
+                    vertices_offset + idx1,
+                    vertices_offset + idx2,
+                    vertices_offset + idx3
+                ))
 
         face_tirangle_offsets.append(len(triangles))
         face_vertices_offsets.append(len(vertices))
     if not vertices or not triangles:
         return None
+
+    # create mesh
     mesh = bpy.data.meshes.new(name)
     mesh.from_pydata(vertices, [], triangles)
     del vertices
-    del triangles
 
     # assign UV
-    uv_layer = mesh.uv_layers.new(name="UVMap")
+    uv_layer = mesh.uv_layers.new(name="SLIZ_UVMap")
     uv_data = uv_layer.data
-    for face in lod_data:
-        if "TexCoord0" in face and "TexCoord0Domain" in face and len(face["TexCoord0"]) == len(face["Position"]) / 6 * 4:
-            # precalculate that face UV is valid and merge its domain info
-            face["SLIZ_UV_domain"] = [
-                *face["TexCoord0Domain"]["Min"],
-                *face["TexCoord0Domain"]["Max"],
-            ]
-    try:
-        for loop in mesh.loops:
-            vertex_idx = loop.vertex_index
-            face = 0
-            while face_vertices_offsets[face] <= vertex_idx:
-                vertex_idx -= face_vertices_offsets[face]
-                face += 1
-            face = lod_data[face]
-            if "SLIZ_UV_domain" in face:
-                domain = face["SLIZ_UV_domain"]
-                uv_offset = vertex_idx * 4
-                data = face["TexCoord0"]
+
+    face_index = 0
+    vertices_offset = 0
+    next_triangle_offset = face_tirangle_offsets[face_index]
+    domain = lod_data[face_index].get("SLIZ_UV_domain")
+    offset = lod_data[face_index].get("SLIZ_UV_offset")
+    data = lod_data[face_index].get("TexCoord0")
+    for i, triangle in enumerate(triangles):
+        while next_triangle_offset <= i:
+            vertices_offset = face_vertices_offsets[face_index]
+            face_index += 1
+            next_triangle_offset = face_tirangle_offsets[face_index]
+            domain = lod_data[face_index].get("SLIZ_UV_domain")
+            offset = lod_data[face_index].get("SLIZ_UV_offset")
+            data = lod_data[face_index].get("TexCoord0")
+        loop_idx = i * 3
+
+        if domain:
+            for j, idx in enumerate(triangle):
+                uv_offset = (idx - vertices_offset) * 4
                 u = struct.unpack('<H', data[uv_offset:uv_offset+2])[0]
                 v = struct.unpack('<H', data[uv_offset+2:uv_offset+4])[0]
 
-                u_float = domain[0] + (u / 65535.0) * (domain[2] - domain[0])
-                v_float = domain[1] + (v / 65535.0) * (domain[3] - domain[1])
-                uv_data[loop.index].uv = (u_float, v_float)
-    except Exception as e:
-        # TODO: only for debuggins
-        num_vertices = 0
+                u_float = domain[0] + (u / 65535.0) * (domain[2] - domain[0]) + offset[0]
+                v_float = domain[1] + (v / 65535.0) * (domain[3] - domain[1]) + offset[1]
+
+                uv_data[i * 3 + j].uv = (u_float, v_float)
+    del triangles
 
     # assign Normals
     normals = []

@@ -383,7 +383,8 @@ class OXPParser():
 
             mat["sl_fullbright"] = texture_data.get("fullbright", 0)
             mat["sl_glow"] = texture_data.get("glow", 0.0)
-            # TODO could multiply this on color_texture
+            # TODO could multiply this on color_texture,
+            # hoever, it is easier to recreate when on the default value
             principled.inputs["Base Color"].default_value = base_color_tint
 
             # uuids to image
