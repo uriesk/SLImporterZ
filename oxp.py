@@ -164,7 +164,7 @@ class OXPParser():
         # use alternative_name if name from oxp data isn't available or an uuid
         if not name or (len(name) == 36 and name[8] == "-"):
             name = alternative_name
-        text = bpy.data.texts.new(name)
+        text = bpy.data.texts.new(name + ".lsl")
         text["sl_uuid"] = uuid
         text.write(content)
         return text
