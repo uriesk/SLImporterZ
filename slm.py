@@ -35,6 +35,7 @@ def import_lod_mesh(lod_data, name, **kwargs):
         return None
     collection = kwargs.get("collection")
     custom_properties = kwargs.get("custom_properties")
+    prim_scale = kwargs.get("prim_scale")
     # lod_data:
     #  [{
     #    Normal,
@@ -159,7 +160,7 @@ def import_lod_mesh(lod_data, name, **kwargs):
     # assign Normals
     normals = []
     for i, next_vertices_offset in enumerate(face_vertices_offsets):
-        data = lod_data[i].get("Normal", None)
+        data = lod_data[i].get("Normal")
         num_vertices = next_vertices_offset - len(normals)
         if data is not None and len(data) == num_vertices * 6:
             for u in range(num_vertices):
@@ -206,16 +207,23 @@ def import_lod_mesh(lod_data, name, **kwargs):
     else:
         bpy.context.scene.collection.objects.link(obj)
 
+    # scale obect to target size
+    if prim_scale:
+        # assume that all faces have the same normalized scale
+        scale_x, scale_y, scale_z = lod_data[0].get("NormalizedScale", [1.0, 1.0, 1.0])
+        obj.scale = (prim_scale[0] / scale_x, prim_scale[1] / scale_y, prim_scale[2] / scale_z)
+
     return obj
 
 
 def import_slm(stream, name, **kwargs):
     imported_meshe_objects = []
-    filepath = kwargs.get("filepath", None)
+    filepath = kwargs.get("filepath")
     create_debug_info = kwargs.get("create_debug_info", False)
     extract_lods = kwargs.get("extract_lods", False)
-    custom_properties = kwargs.get("custom_properties", None)
-    collection_name = kwargs.get("collection_name", None)
+    custom_properties = kwargs.get("custom_properties")
+    collection_name = kwargs.get("collection_name")
+    prim_scale = kwargs.get("prim_scale")
 
     # create stream if its not one, stream needs to be seekable
     if isinstance(stream, bytes):
@@ -302,6 +310,7 @@ def import_slm(stream, name, **kwargs):
                 name  + suffix,
                 collection=mesh_collection,
                 custom_properties=custom_properties,
+                prim_scale=prim_scale
             )
             if mesh_object is not None:
                 imported_meshe_objects.append(mesh_object)

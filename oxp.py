@@ -513,16 +513,15 @@ class OXPParser():
                     create_debug_info=self.create_debug_info,
                     extract_lods=self.extract_lods,
                     custom_properties={ "sl_uuid": mesh_uuid },
-                    collection_name=collection_name
+                    collection_name=collection_name,
+                    prim_scale=prim_data.get("scale", [1.0, 1.0, 1.0])
                 )
 
             # apply data do mesh
-            prim_scale = prim_data.get("scale", [1.0, 1.0, 1.0])
             prim_position = prim_data.get("position", [0.0, 0.0, 0.0])
             prim_rotation = prim_data.get("rotation", [0.0, 0.0, 0.0, 1.0])
             materials = self._create_materials_for_prim(prim_data, name)
             for obj in imported_mesh_objects:
-                obj.scale = (prim_scale[0], prim_scale[1], prim_scale[2])
                 if parent_uuid:
                     # If we are a child in a linkset, positions are relative to
                     # parent so we may apply them
