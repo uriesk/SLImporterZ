@@ -80,9 +80,9 @@ def import_lod_mesh(lod_data, name, **kwargs):
             z = struct.unpack('<H', data[offset+4:offset+6])[0]
             # Unpack from 16-bit to float
             # Domain: [min, max] mapped to [0, 65535]
-            x_float = domain_min[0] + (x / 65535.0) * (domain_max[0] - domain_min[0]) * scale_x
-            y_float = domain_min[1] + (y / 65535.0) * (domain_max[1] - domain_min[1]) * scale_y
-            z_float = domain_min[2] + (z / 65535.0) * (domain_max[2] - domain_min[2]) * scale_z
+            x_float = (domain_min[0] + (x / 65535.0) * (domain_max[0] - domain_min[0])) * scale_x
+            y_float = (domain_min[1] + (y / 65535.0) * (domain_max[1] - domain_min[1])) * scale_y
+            z_float = (domain_min[2] + (z / 65535.0) * (domain_max[2] - domain_min[2])) * scale_z
             vertices.append(Vector((x_float, y_float, z_float)))
 
         # set SLIZ_UV_domain and SLIZ_UV_offset if uv seems legit

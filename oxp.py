@@ -145,7 +145,7 @@ class OXPParser():
 
         # search in existing textblocks first
         for text in bpy.data.texts:
-            if text.get["sl_uuid"] == uuid:
+            if text.get("sl_uuid") == uuid:
                 return text
 
         assets = self.oxp_data.get("asset")
@@ -164,11 +164,9 @@ class OXPParser():
         # use alternative_name if name from oxp data isn't available or an uuid
         if not name or (len(name) == 36 and name[8] == "-"):
             name = alternative_name
-        if name:
-            image.name = name
         text = bpy.data.texts.new(name)
+        text["sl_uuid"] = uuid
         text.write(content)
-        text.pack()
         return text
 
     def _get_material_from_gltf(self, gltf_data):
@@ -350,9 +348,9 @@ class OXPParser():
             links.new(principled.outputs["BSDF"], output.inputs["Surface"])
 
             # texture uuids
-            color_texture = self.get_texture(texture_data.get("imageid"), material_name)
-            normal_texture = self.get_texture(material_data.get("NormMap"), material_name + "_n")
-            specular_texture = self.get_texture(material_data.get("SpecMap"), material_name + "_s")
+            color_texture = texture_data.get("imageid")
+            normal_texture = material_data.get("NormMap")
+            specular_texture = material_data.get("SpecMap")
             emissive_texture = None
             orm_texture = None
 

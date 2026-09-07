@@ -16,6 +16,8 @@
     along with this program.  If not, see <https://www.gnu.org/licenses/>.
 '''
 
+import json
+
 def merge_dicts(dict1, dict2):
     # merge two dicts together
     result = dict1.copy()
