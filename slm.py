@@ -19,6 +19,7 @@
 import bpy
 
 from . import llsdz
+from . import utils
 
 import os
 import io
@@ -245,7 +246,7 @@ def import_slm(stream, name, **kwargs):
     if create_debug_info and filepath is not None:
         # Print structure into debug file within same folder
         tree_lines = []
-        tree_lines.extend(llsdz.print_tree(slm_metadata))
+        tree_lines.extend(utils.print_tree(slm_metadata))
         tree_filepath = os.path.splitext(filepath)[0] + "_slmtree" + ".txt"
         with open(tree_filepath, 'w', encoding='utf-8') as f:
             f.write('\n'.join(tree_lines))
@@ -284,7 +285,7 @@ def import_slm(stream, name, **kwargs):
             if create_debug_info and filepath is not None:
                 # Print structure into debug file within same folder
                 tree_lines = []
-                tree_lines.extend(llsdz.print_tree(lod_data))
+                tree_lines.extend(utils.print_tree(lod_data))
                 tree_filepath = os.path.splitext(filepath)[0] + suffix + "_meshtree" + ".txt"
                 with open(tree_filepath, 'w', encoding='utf-8') as f:
                     f.write('\n'.join(tree_lines))

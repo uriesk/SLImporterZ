@@ -244,7 +244,7 @@ class OXPParser():
 
         if self.create_debug_info:
             tree_lines = []
-            tree_lines.extend(llsdz.print_tree(slmat_data))
+            tree_lines.extend(utils.print_tree(slmat_data))
             tree_filepath = os.path.splitext(filepath)[0] + "_slmattree.txt"
             with open(tree_filepath, 'w', encoding='utf-8') as f:
                 f.write('\n'.join(tree_lines))
@@ -457,7 +457,7 @@ class OXPParser():
         if self.create_debug_info:
             # Print structure into debug file within same folder
             tree_lines = []
-            tree_lines.extend(llsdz.print_tree(self.oxp_data))
+            tree_lines.extend(utils.print_tree(self.oxp_data))
             tree_filepath = os.path.splitext(self.filepath)[0] + "_oxptree.txt"
             with open(tree_filepath, 'w', encoding='utf-8') as f:
                 f.write('\n'.join(tree_lines))
