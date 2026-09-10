@@ -503,6 +503,17 @@ class OXPParser():
                     if parent_data is not None:
                         collection_name = parent_data.get("name", parent_uuid)
 
+            # determine translation
+            prim_scale = prim_data.get("scale")
+            prim_position = None
+            prim_rotation = None
+            if parent_uuid:
+                # If we are a child in a linkset, positions are relative to
+                # parent so we may apply them
+                prim_position = prim_data.get("position")
+                # quaternion
+                prim_rotation = prim_data.get("rotation")
+
             with open(slm_filepath, 'rb') as f:
                 imported_mesh_objects = slm.import_slm(
                     f,
@@ -515,18 +526,9 @@ class OXPParser():
                     prim_scale=prim_data.get("scale", [1.0, 1.0, 1.0])
                 )
 
-            # apply data do mesh
-            prim_position = prim_data.get("position", [0.0, 0.0, 0.0])
-            prim_rotation = prim_data.get("rotation", [0.0, 0.0, 0.0, 1.0])
+            # apply materials
             materials = self._create_materials_for_prim(prim_data, name)
             for obj in imported_mesh_objects:
-                if parent_uuid:
-                    # If we are a child in a linkset, positions are relative to
-                    # parent so we may apply them
-                    obj.location = (prim_position[0], prim_position[1], prim_position[2])
-                    obj.rotation_mode = 'QUATERNION'
-                    obj.rotation_quaternion = (prim_rotation[3], prim_rotation[0], prim_rotation[1], prim_rotation[2])
-                # apply materials
                 for i, material in enumerate(materials):
                     obj.data.materials[i] = material
 
@@ -695,7 +697,7 @@ class SLIZ_IMPORT_oxp(bpy.types.Operator, ImportHelper):
         try:
             amount_imported_meshes, amount_meshes = oxp_parser.parse_from_file(self.filepath)
         except Exception as e:
-            # TODO: only for debuggins
+            # TODO: only for debugging
             raise e
             self._notify({'ERROR'}, str(e))
             return {'CANCELLED'}

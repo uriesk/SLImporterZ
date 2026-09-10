@@ -1,3 +1,4 @@
 - Parse Physics shape when it isn't a convex hulls
 - maybe a few more material properties
-- rigging
+- rigging scale
+- temporry folder

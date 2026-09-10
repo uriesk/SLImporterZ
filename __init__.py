@@ -30,10 +30,13 @@ if "bpy" in locals():
         importlib.reload(llsdz)
     if "utils" in locals():
         importlib.reload(utils)
+    if "skeleton" in locals():
+        importlib.reload(skeleton)
 
 from . import collada
 from . import oxp
 from . import slm
+from . import skeleton
 
 class SLIZ_preferences(bpy.types.AddonPreferences):
     bl_idname = __package__
@@ -47,16 +50,23 @@ class SLIZ_preferences(bpy.types.AddonPreferences):
         col = layout.column()
         col.prop(self, "ui_help")
 
+def menu_func_import_seperator(self, context):
+    self.layout.separator()
+
 def register():
     bpy.utils.register_class(SLIZ_preferences)
+    bpy.types.TOPBAR_MT_file_import.append(menu_func_import_seperator)
     slm.register()
     oxp.register()
     collada.register()
+    skeleton.register()
 
 def unregister():
+    skeleton.unregister()
     collada.unregister()
     oxp.unregister()
     slm.unregister()
+    bpy.types.TOPBAR_MT_file_import.remove(menu_func_import_seperator)
     bpy.utils.unregister_class(SLIZ_preferences)
 
 if __name__ == "__main__":

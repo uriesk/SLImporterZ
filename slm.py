@@ -20,6 +20,7 @@ import bpy
 
 from . import llsdz
 from . import utils
+from . import skeleton
 
 import os
 import io
@@ -27,9 +28,47 @@ import time
 import traceback
 import zlib
 import struct
+import math
 from bpy_extras.io_utils import ImportHelper
-from mathutils import Vector
+from mathutils import Vector, Matrix
 
+
+def affine_transform(matrix, v):
+    col0 = matrix.col[0].xyz
+    col1 = matrix.col[1].xyz
+    col2 = matrix.col[2].xyz
+    trans = matrix.col[3].xyz
+
+    return Vector((
+        v.x * col0.x + v.y * col1.x + v.z * col2.x + trans.x,
+        v.x * col0.y + v.y * col1.y + v.z * col2.y + trans.y,
+        v.x * col0.z + v.y * col1.z + v.z * col2.z + trans.z,
+        1
+    ))
+
+Rz90 = Matrix((
+       (0.0, 1.0, 0.0, 0.0),
+       (-1.0, 0.0, 0.0, 0.0),
+       (0.0, 0.0, 1.0, 0.0),
+       (0.0, 0.0, 0.0, 1.0)
+       ))
+Rz90I = Rz90.inverted()
+
+
+def matrix_from_array(array):
+    M = Matrix()
+    for i in range(0,4):
+        for j in range(0,4):
+            M[i][j] = array[4*j + i]
+    return M
+
+def print_matrix(matrix, name):
+    translation, rotation, scale = matrix.decompose()
+    print(name)
+    print(str(matrix))
+    print(f"Translation:\n{translation}")
+    print(f"Rotation:\n{tuple(math.degrees(a) for a in rotation.to_euler())}")
+    print(f"Scale:\n{scale}\n")
 
 def import_lod_mesh(lod_data, name, **kwargs):
     if not lod_data:
@@ -37,6 +76,13 @@ def import_lod_mesh(lod_data, name, **kwargs):
     collection = kwargs.get("collection")
     custom_properties = kwargs.get("custom_properties")
     prim_scale = kwargs.get("prim_scale")
+    prim_position = kwargs.get("prim_position")
+    prim_rotation = kwargs.get("prim_rotation")
+    bind_shape_matrix = kwargs.get("bind_shape_matrix")
+    joint_names = kwargs.get("joint_names")
+    inverse_bind_matrices = kwargs.get("inverse_bind_matrices")
+    bones = kwargs.get("bones")
+    armature=kwargs.get("armature")
     # lod_data:
     #  [{
     #    Normal,
@@ -54,6 +100,11 @@ def import_lod_mesh(lod_data, name, **kwargs):
 
     vertices = []
     triangles = []
+    weights_per_joint = []
+
+    if bones:
+        weights_per_joint = [[] for _ in range(len(bones))]
+
     # Create Mesh out of Vertices and Triangles
     for face in lod_data:
         if face.get("NoGeometry", False):
@@ -69,8 +120,13 @@ def import_lod_mesh(lod_data, name, **kwargs):
             domain_min = [-0.5, -0.5, -0.5]
         scale_x, scale_y, scale_z = face.get("NormalizedScale", [1.0, 1.0, 1.0])
 
+        # Get weights as well with vertices
+        weight_data = face.get("Weights", b'')
+        weight_offset = 0 # offset within weights data
+        weight_length = len(weight_data)
+
         # Get vertices
-        vertices_offset = len(vertices)
+        vertices_offset = len(vertices) # total vertices offset of face
         data = face.get("Position", b'')
         num_vertices = len(data) // 6
         for i in range(num_vertices):
@@ -83,7 +139,52 @@ def import_lod_mesh(lod_data, name, **kwargs):
             x_float = (domain_min[0] + (x / 65535.0) * (domain_max[0] - domain_min[0])) * scale_x
             y_float = (domain_min[1] + (y / 65535.0) * (domain_max[1] - domain_min[1])) * scale_y
             z_float = (domain_min[2] + (z / 65535.0) * (domain_max[2] - domain_min[2])) * scale_z
-            vertices.append(Vector((x_float, y_float, z_float)))
+            pos = Vector((x_float, y_float, z_float, 1.0))
+
+            vertex_influences = []
+            vertex_weights = []
+            while len(vertex_influences) < 4 and weight_offset < weight_length:
+                joint_idx = weight_data[weight_offset]
+                weight_offset += 1
+                if joint_idx == 0xFF:
+                    break
+
+                weight_val = struct.unpack('<H', weight_data[weight_offset:weight_offset+2])[0]
+
+                weight_float = weight_val / 65535.0
+                # for skinning into rest pose
+                vertex_influences.append(joint_idx)
+                vertex_weights.append(weight_float)
+                # for applying weights
+                weights_per_joint[joint_idx].append((vertices_offset + i, weight_float))
+
+                weight_offset += 2
+
+            if bind_shape_matrix:
+                pos = affine_transform(bind_shape_matrix, pos)
+
+            # move into rest pose
+            if bones and len(vertex_influences):
+                skin_mat = Matrix([
+                    [0.0, 0.0, 0.0, 0.0],
+                    [0.0, 0.0, 0.0, 0.0],
+                    [0.0, 0.0, 0.0, 0.0],
+                    [0.0, 0.0, 0.0, 0.0]
+                ])
+                weight_scale = sum(vertex_weights)
+
+                # a skinning shader
+                for i, joint_idx in enumerate(vertex_influences):
+                    weight_float = vertex_weights[i] / weight_scale
+
+                    inverse_bind_matrix = inverse_bind_matrices[joint_idx]
+                    bone_matrix = bones[joint_idx].matrix_local
+                    joint_matrix =  bone_matrix @ inverse_bind_matrix
+                    skin_mat += joint_matrix * weight_float
+
+                pos = affine_transform(skin_mat, pos)
+
+            vertices.append(pos.xyz)
 
         # set SLIZ_UV_domain and SLIZ_UV_offset if uv seems legit
         if "TexCoord0" in face and "TexCoord0Domain" in face and len(face["TexCoord0"]) == num_vertices * 4:
@@ -182,6 +283,16 @@ def import_lod_mesh(lod_data, name, **kwargs):
     del normals
 
     obj = bpy.data.objects.new(mesh.name, mesh)
+
+    # assign weights
+    if weights_per_joint:
+        for i, joint_weights in enumerate(weights_per_joint):
+            joint_name = joint_names[i]
+            vertex_group = obj.vertex_groups.new(name=joint_name)
+            for vertex_idx, weight in joint_weights:
+                vertex_group.add([vertex_idx], weight, 'REPLACE')
+        del weights_per_joint
+
     # add custom properties if we have some
     if custom_properties:
         for key, value in custom_properties.items():
@@ -208,14 +319,42 @@ def import_lod_mesh(lod_data, name, **kwargs):
     else:
         bpy.context.scene.collection.objects.link(obj)
 
-    # scale obect to target size
-    if prim_scale:
-        # assume that all faces have the same normalized scale
-        scale_x, scale_y, scale_z = lod_data[0].get("NormalizedScale", [1.0, 1.0, 1.0])
-        obj.scale = (prim_scale[0] / scale_x, prim_scale[1] / scale_y, prim_scale[2] / scale_z)
+    # translate obect if we aren't bound to an armature
+    if not bind_shape_matrix:
+        if prim_scale:
+            # assume that all faces have the same normalized scale
+            scale_x, scale_y, scale_z = lod_data[0].get("NormalizedScale", [1.0, 1.0, 1.0])
+            obj.scale = (prim_scale[0] / scale_x, prim_scale[1] / scale_y, prim_scale[2] / scale_z)
+        if prim_position:
+            obj.location = (prim_position[0], prim_position[1], prim_position[2])
+        if prim_rotation:
+            obj.rotation_mode = 'QUATERNION'
+            obj.rotation_quaternion = (prim_rotation[3], prim_rotation[0], prim_rotation[1], prim_rotation[2])
 
     return obj
 
+def read_compressed_llsd_from_stream(stream, offset, size):
+    stream.seek(offset - stream.tell(), io.SEEK_CUR)
+
+    decompressor = zlib.decompressobj()
+    parser = llsdz.parseobj()
+    size_left = size
+    while size_left > 0:
+        chunk_size = min(65536, size_left)
+        chunk = stream.read(chunk_size)
+        if not chunk:
+            break
+        size_left -= chunk_size
+        decompressed_chunk = decompressor.decompress(chunk)
+        if decompressed_chunk:
+            if parser.parse(decompressed_chunk):
+                break
+
+    final_chunk = decompressor.flush()
+    if final_chunk and not parser.done:
+        parser.parse(final_chunk)
+    data, _ = parser.flush()
+    return data
 
 def import_slm(stream, name, **kwargs):
     imported_meshe_objects = []
@@ -225,6 +364,8 @@ def import_slm(stream, name, **kwargs):
     custom_properties = kwargs.get("custom_properties")
     collection_name = kwargs.get("collection_name")
     prim_scale = kwargs.get("prim_scale")
+    prim_position = kwargs.get("prim_position")
+    prim_rotation = kwargs.get("prim_rotation")
 
     # create stream if its not one, stream needs to be seekable
     if isinstance(stream, bytes):
@@ -251,33 +392,63 @@ def import_slm(stream, name, **kwargs):
         with open(tree_filepath, 'w', encoding='utf-8') as f:
             f.write('\n'.join(tree_lines))
 
+    armature = None
+    inverse_bind_matrices = None
+    bind_shape_matrix = None
+    joint_names = None
+    bones = None
+    if "skin" in slm_metadata:
+        skin_offset = start_pos + header_size + slm_metadata["skin"]["offset"]
+        skin_size = slm_metadata["skin"]["size"]
+        skin_data = read_compressed_llsd_from_stream(stream, skin_offset, skin_size)
+
+        if create_debug_info and filepath is not None:
+            # Print structure into debug file within same folder
+            tree_lines = []
+            tree_lines.extend(utils.print_tree(skin_data))
+            tree_filepath = os.path.splitext(filepath)[0] + "_skintree" + ".txt"
+            with open(tree_filepath, 'w', encoding='utf-8') as f:
+                f.write('\n'.join(tree_lines))
+
+        if "bind_shape_matrix" in skin_data:
+            bind_shape_matrix = matrix_from_array(skin_data["bind_shape_matrix"])
+        if "joint_names" in skin_data:
+            joint_names = skin_data["joint_names"]
+
+            # find existing armature or create new one
+            armature = None
+            for armature_obj in bpy.data.objects:
+                if armature_obj.type != 'ARMATURE':
+                    continue
+                existing_bones = set(bone.name for bone in armature_obj.data.bones)
+                if all(joint in existing_bones for joint in joint_names):
+                    armature = armature_obj
+            if armature is None:
+                armature, _ = skeleton.add_skeleton(bpy.context)
+
+            bones = []
+            for i, joint_name in enumerate(joint_names):
+                bones.append(armature.data.bones[joint_name])
+        if "inverse_bind_matrix" in skin_data:
+            inverse_bind_matrices = []
+            for i, inverse_bind_matrix in enumerate(skin_data["inverse_bind_matrix"]):
+                bone_matrix = bones[i].matrix_local
+
+                inverse_bind_matrix = matrix_from_array(inverse_bind_matrix)
+                bind_matrix = inverse_bind_matrix.inverted()
+                t_target, r_target, s_target = bind_matrix.decompose()
+                t_source, r_source, s_source = bone_matrix.decompose()
+                bind_matrix = Matrix.LocRotScale(t_target, r_target @ r_source, s_source)
+                inverse_bind_matrix = bind_matrix.inverted()
+
+                inverse_bind_matrices.append(inverse_bind_matrix)
+
     for lod_name, type_name in (("high_lod", None), ("medium_lod", "LOD2"), ("low_lod", "LOD1"), ("lowest_lod", "LOD0")):
 
         if lod_name in slm_metadata and (extract_lods or lod_name == "high_lod") and isinstance(slm_metadata[lod_name], dict):
             lod_offset = start_pos + header_size + slm_metadata[lod_name]["offset"]
             lod_size = slm_metadata[lod_name]["size"]
-            stream.seek(lod_offset - stream.tell(), io.SEEK_CUR)
-
-            decompressor = zlib.decompressobj()
-            parser = llsdz.parseobj()
-            size_left = lod_size
-            while size_left > 0:
-                chunk_size = min(131072, size_left)
-                chunk = stream.read(chunk_size)
-                if not chunk:
-                    break
-                size_left -= chunk_size
-                decompressed_chunk = decompressor.decompress(chunk)
-                if decompressed_chunk:
-                    if parser.parse(decompressed_chunk):
-                        break
-        
-            final_chunk = decompressor.flush()
-            if final_chunk and not parser.done:
-                parser.parse(final_chunk)
-            lod_data, _ = parser.flush()
-            del decompressor
-            del parser
+            lod_data = read_compressed_llsd_from_stream(stream, lod_offset, lod_size)
 
             suffix = f"_{type_name}" if type_name else ""
             prefix = f"{type_name}_" if type_name else ""
@@ -311,7 +482,14 @@ def import_slm(stream, name, **kwargs):
                 name  + suffix,
                 collection=mesh_collection,
                 custom_properties=custom_properties,
-                prim_scale=prim_scale
+                prim_scale=prim_scale,
+                prim_position=prim_position,
+                prim_rotation=prim_rotation,
+                joint_names=joint_names,
+                bind_shape_matrix=bind_shape_matrix,
+                inverse_bind_matrices=inverse_bind_matrices,
+                armature=armature,
+                bones=bones
             )
             if mesh_object is not None:
                 imported_meshe_objects.append(mesh_object)
