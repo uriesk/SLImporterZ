@@ -21,15 +21,8 @@ import os
 import xml.etree.ElementTree as ET
 import math
 import mathutils
+import json
 
-
-Rz90 = mathutils.Matrix((
-       (0.0, 1.0, 0.0, 0.0),
-       (-1.0, 0.0, 0.0, 0.0),
-       (0.0, 0.0, 1.0, 0.0),
-       (0.0, 0.0, 0.0, 1.0)
-       ))
-Rz90I = Rz90.inverted()
 
 def get_skeleton():
     tree = ET.parse(os.path.join(os.path.dirname(os.path.realpath(__file__)), "assets", "avatar_skeleton.xml"))
@@ -52,25 +45,15 @@ def get_skeleton():
         if parent:
             offset = result[parent]["pos"]
             entry["pos"] = [entry["pos_orig"][i]+offset[i] for i in range(0,3)]
+            #entry["rot"] = result[parent]["rot"] @ mathutils.Euler(entry["rot_orig"], "XYZ").to_matrix().to_4x4()
         else:
             entry["pos"] = entry["pos_orig"]
         entry["end"] = [entry["end_orig"][i]+entry["pos"][i] for i in range(0,3)]
-
-        entry["scale"] = mathutils.Matrix.Scale(entry["scale_orig"][0], 4, (1,0,0))
-        entry["scale"] *= mathutils.Matrix.Scale(entry["scale_orig"][1], 4, (0,1,0))
-        entry["scale"] *= mathutils.Matrix.Scale(entry["scale_orig"][2], 4, (0,0,1))
-
+        # TODO: i don't know what to do with rot yet
         entry["rot"] = mathutils.Euler(entry["rot_orig"], "XYZ").to_matrix().to_4x4()
-        print(name, entry["rot"])
 
-        # --- FIX HERE ---
-        # NOTE: unclear whether or not we have to care about converting it to
-        # X+ forward, which would be z rotation +90 degrees
-        # Convert from SL (X+ forward) to Blender (Y+ forward)
-        # Rotate -90° around Z
-        #conversion = mathutils.Matrix.Rotation(math.radians(-90), 4, 'Z')
-        #entry["rot"] = conversion @ entry["rot"] @ conversion.inverted()
-        # --- END FIX ---
+        sx, sy, sz = entry["scale_orig"]
+        entry["scale"] = mathutils.Matrix.Diagonal((sx, sy, sz, 1.0))
 
         result[name] = entry
         
@@ -109,15 +92,38 @@ def add_skeleton(context):
     bone_collection = armature.collections.new(name="bone")
     collision_collection = armature.collections.new(name="collision_volume")
 
+    # Assign bones to collections based on type
     for bone_name, bone in bones.items():
-        # Assign bones to collections based on type
         if bone["type"] == "collision_volume":
             armature.collections["collision_volume"].assign(pose.bones[bone_name])
         else:
             armature.collections["bone"].assign(pose.bones[bone_name])
 
+    # inverse_bind_matrix from SL data includes absolute translation, but
+    # already transformed relative rotation and scale.
+    # bind_matrix_transform can be used to add it.
+    json_data = {}
+    for bone_name in boners.keys():
+        boner_matrix = armature.bones[bone_name].matrix_local
+
+        boner_rotation_matrix = boner_matrix.to_quaternion().to_matrix().to_4x4()
+        bind_matrix_transform = bones[bone_name]["scale"].inverted() @ boner_rotation_matrix
+        json_data[bone_name] = [list(row) for row in bind_matrix_transform]
+
+    json_path = os.path.join(os.path.dirname(os.path.realpath(__file__)), "assets", "bind_matrix_transform.json")
+    with open(json_path, "w") as f:
+        json.dump(json_data, f, indent=2)
+
     armature_obj.location = (0,0,0)
     return armature_obj
+
+def get_bind_matrix_transform():
+    path = os.path.join(os.path.dirname(os.path.realpath(__file__)), "assets", "bind_matrix_transform.json")
+    with open(path, "r") as f:
+        data = json.load(f)
+    for bone_name, bind_matrix_transform in data.items():
+        data[bone_name] = mathutils.Matrix(bind_matrix_transform)
+    return data
 
 class SLIZ_ADD_armature(bpy.types.Operator):
     bl_idname = "object.sliz_armature"

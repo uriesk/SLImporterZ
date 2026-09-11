@@ -435,27 +435,17 @@ def import_slm(stream, name, **kwargs):
                 bones.append(armature.data.bones[joint_name])
         if "inverse_bind_matrix" in skin_data:
             # corret inverse bind matrices according to standard skeleton
-            orig_bones = skeleton.get_skeleton()
+            bind_matrix_transforms = skeleton.get_bind_matrix_transform()
 
             inverse_bind_matrices = []
             for i, inverse_bind_matrix in enumerate(skin_data["inverse_bind_matrix"]):
-                orig_bone_data = orig_bones[joint_names[i]]
-                orig_bone_position = orig_bone_data["pos"] # xyz vector
-                orig_bone_rotation = orig_bone_data["rot"] # rotation matrix
-                orig_bone_scale = orig_bone_data["scale"] # scaling matrix
-
-                our_bone = bones[i].matrix_local
-
                 inverse_bind_matrix = matrix_from_array(inverse_bind_matrix)
                 bind_matrix = inverse_bind_matrix.inverted()
-                t_target, r_target, s_target = bind_matrix.decompose()
-                bind_matrix = Matrix.LocRotScale(
-                    t_target,
-                    r_target @ our_bone.to_quaternion(),
-                    s_target * orig_bone_scale.inverted().to_scale()
-                )
-                inverse_bind_matrix = bind_matrix.inverted()
+                bind_matrix_transform = bind_matrix_transforms[joint_names[i]]
 
+                bind_matrix = bind_matrix @ bind_matrix_transform
+
+                inverse_bind_matrix = bind_matrix.inverted()
                 inverse_bind_matrices.append(inverse_bind_matrix)
 
     for lod_name, type_name in (("high_lod", None), ("medium_lod", "LOD2"), ("low_lod", "LOD1"), ("lowest_lod", "LOD0")):
