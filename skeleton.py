@@ -20,7 +20,7 @@ import bpy
 import os
 import xml.etree.ElementTree as ET
 import math
-import mathutils
+from mathutils import Vector, Matrix, Euler
 import json
 
 
@@ -45,15 +45,16 @@ def get_skeleton():
         if parent:
             offset = result[parent]["pos"]
             entry["pos"] = [entry["pos_orig"][i]+offset[i] for i in range(0,3)]
-            #entry["rot"] = result[parent]["rot"] @ mathutils.Euler(entry["rot_orig"], "XYZ").to_matrix().to_4x4()
+            #entry["rot"] = result[parent]["rot"] @ Euler(entry["rot_orig"], "XYZ").to_matrix().to_4x4()
         else:
             entry["pos"] = entry["pos_orig"]
         entry["end"] = [entry["end_orig"][i]+entry["pos"][i] for i in range(0,3)]
-        # TODO: i don't know what to do with rot yet
-        entry["rot"] = mathutils.Euler(entry["rot_orig"], "XYZ").to_matrix().to_4x4()
+        # TODO: i don't know what to do with rot yet, or whether or not its
+        # relative or per parent like pos
+        entry["rot"] = Euler(entry["rot_orig"], "XYZ").to_matrix().to_4x4()
 
         sx, sy, sz = entry["scale_orig"]
-        entry["scale"] = mathutils.Matrix.Diagonal((sx, sy, sz, 1.0))
+        entry["scale"] = Matrix.Diagonal((sx, sy, sz, 1.0))
 
         result[name] = entry
         
@@ -125,7 +126,7 @@ def get_bind_matrix_transform():
     with open(path, "r") as f:
         data = json.load(f)
     for bone_name, bind_matrix_transform in data.items():
-        data[bone_name] = mathutils.Matrix(bind_matrix_transform)
+        data[bone_name] = Matrix(bind_matrix_transform)
     return data
 
 class SLIZ_ADD_armature(bpy.types.Operator):

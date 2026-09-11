@@ -211,7 +211,6 @@ class OXPParser():
                 self._resolve_textures_in_gltf_material(item, textures_data, images_data)
 
     def _get_pbr_material(self, uuid):
-        print("check for material: " + uuid)
         if not uuid or self.oxp_data is None:
             return None
         assets = self.oxp_data.get("asset")
@@ -481,7 +480,6 @@ class OXPParser():
             if not slm_filepath:
                 continue
             self.amount_meshes += 1
-            print(f"Found mesh {mesh_uuid}: {slm_filepath}")
 
             prim_data = self.get_prim_to_mesh_uuid(mesh_uuid)
             if prim_data is None:

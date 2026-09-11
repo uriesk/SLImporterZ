@@ -30,7 +30,7 @@ import zlib
 import struct
 import math
 from bpy_extras.io_utils import ImportHelper
-from mathutils import Vector, Matrix
+from mathutils import Quaternion, Vector, Matrix
 
 
 def affine_transform(matrix, v):
@@ -118,7 +118,9 @@ def import_lod_mesh(lod_data, name, **kwargs):
         else:
             domain_max = [0.5, 0.5, 0.5]
             domain_min = [-0.5, -0.5, -0.5]
+
         scale_x, scale_y, scale_z = face.get("NormalizedScale", [1.0, 1.0, 1.0])
+        scale_matrix = Matrix.Diagonal((scale_x, scale_y, scale_z, 1.0))
 
         # Get weights as well with vertices
         weight_data = face.get("Weights", b'')
@@ -136,9 +138,9 @@ def import_lod_mesh(lod_data, name, **kwargs):
             z = struct.unpack('<H', data[offset+4:offset+6])[0]
             # Unpack from 16-bit to float
             # Domain: [min, max] mapped to [0, 65535]
-            x_float = (domain_min[0] + (x / 65535.0) * (domain_max[0] - domain_min[0])) * scale_x
-            y_float = (domain_min[1] + (y / 65535.0) * (domain_max[1] - domain_min[1])) * scale_y
-            z_float = (domain_min[2] + (z / 65535.0) * (domain_max[2] - domain_min[2])) * scale_z
+            x_float = domain_min[0] + (x / 65535.0) * (domain_max[0] - domain_min[0])
+            y_float = domain_min[1] + (y / 65535.0) * (domain_max[1] - domain_min[1])
+            z_float = domain_min[2] + (z / 65535.0) * (domain_max[2] - domain_min[2])
             pos = Vector((x_float, y_float, z_float, 1.0))
 
             vertex_influences = []
@@ -162,6 +164,8 @@ def import_lod_mesh(lod_data, name, **kwargs):
 
             if bind_shape_matrix:
                 pos = affine_transform(bind_shape_matrix, pos)
+            else:
+                pos = affine_transform(scale_matrix, pos)
 
             # move into rest pose
             if bones and len(vertex_influences):
@@ -332,8 +336,7 @@ def import_lod_mesh(lod_data, name, **kwargs):
             obj.location = (prim_position[0], prim_position[1], prim_position[2])
         if prim_rotation:
             obj.rotation_mode = 'QUATERNION'
-            # TODO X+ forward
-            obj.rotation_quaternion = (prim_rotation[3], prim_rotation[0], prim_rotation[1], prim_rotation[2])
+            obj.rotation_quaternion = Rz90.to_quaternion @ Quaternion(prim_rotation[3], prim_rotation[0], prim_rotation[1], prim_rotation[2])
 
     return obj
 
@@ -440,6 +443,10 @@ def import_slm(stream, name, **kwargs):
             inverse_bind_matrices = []
             for i, inverse_bind_matrix in enumerate(skin_data["inverse_bind_matrix"]):
                 inverse_bind_matrix = matrix_from_array(inverse_bind_matrix)
+
+                if "alt_inverse_bind_matrix" in skin_data:
+                    inverse_bind_matrix = matrix_from_array(skin_data["alt_inverse_bind_matrix"][i])
+
                 bind_matrix = inverse_bind_matrix.inverted()
                 bind_matrix_transform = bind_matrix_transforms[joint_names[i]]
 
@@ -447,6 +454,22 @@ def import_slm(stream, name, **kwargs):
 
                 inverse_bind_matrix = bind_matrix.inverted()
                 inverse_bind_matrices.append(inverse_bind_matrix)
+        if "alt_inverse_bind_matrix" in skin_data:
+            # optional, if joint offsets are used then the alternate bind matrix
+            # will contain translational information that will override the
+            # default Second Life skeleton. Rotational and scaling components
+            # are at this moment, unused.
+            print("has alt_inverse_bind_matrix")
+            for i, joint_name in enumerate(joint_names):
+                print("")
+                print(joint_name)
+                print(matrix_from_array(skin_data["alt_inverse_bind_matrix"][i]))
+                print(matrix_from_array(skin_data["inverse_bind_matrix"][i]))
+        if "pelvis_offset" in skin_data:
+            # optional, used to provide a pelvis fixup for avatar rigs that
+            # alter the default Second Life skeleton
+            print("pelvis_offset")
+            print(str(skin_data["pelvis_offset"]))
 
     for lod_name, type_name in (("high_lod", None), ("medium_lod", "LOD2"), ("low_lod", "LOD1"), ("lowest_lod", "LOD0")):
 
@@ -653,11 +676,13 @@ class SLIZ_IMPORT_slm(bpy.types.Operator, ImportHelper):
 
         try:
             with open(self.filepath, 'rb') as f:
-                slm_data = f.read()
-            import_slm(slm_data,
-                filepath=self.filepath,
-                create_debug_info=self.create_debug_info
-            )
+                name = os.path.splitext(os.path.basename(self.filepath))[0]
+
+                import_slm(f,
+                    name,
+                    filepath=self.filepath,
+                    create_debug_info=self.create_debug_info
+                )
         except Exception as e:
             self._notify({'ERROR'}, str(e))
             return {'CANCELLED'}
