@@ -361,7 +361,7 @@ def read_compressed_llsd_from_stream(stream, offset, size):
     return data
 
 def import_slm(stream, name, **kwargs):
-    imported_meshe_objects = []
+    imported_mesh_objects = []
     filepath = kwargs.get("filepath")
     create_debug_info = kwargs.get("create_debug_info", False)
     extract_lods = kwargs.get("extract_lods", False)
@@ -497,7 +497,7 @@ def import_slm(stream, name, **kwargs):
                 bones=bones
             )
             if mesh_object is not None:
-                imported_meshe_objects.append(mesh_object)
+                imported_mesh_objects.append(mesh_object)
 
                 if armature is not None:
                     mesh_object.parent = armature
@@ -505,7 +505,7 @@ def import_slm(stream, name, **kwargs):
                     mod = mesh_object.modifiers.new(name="Armature", type='ARMATURE')
                     mod.object = armature
                     mod.use_vertex_groups = True
-    return imported_meshe_objects
+    return imported_mesh_objects
 
 class SLIZ_IMPORT_slm(bpy.types.Operator, ImportHelper):
     """Import one or more SLM (.slm) files"""

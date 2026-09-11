@@ -102,14 +102,17 @@ def add_skeleton(context):
     # inverse_bind_matrix from SL data includes absolute translation, but
     # already transformed relative rotation and scale.
     # bind_matrix_transform can be used to add it.
+    # TODO what do roation from avatar_skeleton.xml?
     json_data = {}
     for bone_name in boners.keys():
         boner_matrix = armature.bones[bone_name].matrix_local
 
+        # rotation from bones created in blender
         boner_rotation_matrix = boner_matrix.to_quaternion().to_matrix().to_4x4()
+        # inverted scale from avatar_skeleton.xml
         bind_matrix_transform = bones[bone_name]["scale"].inverted() @ boner_rotation_matrix
-        json_data[bone_name] = [list(row) for row in bind_matrix_transform]
 
+        json_data[bone_name] = [list(row) for row in bind_matrix_transform]
     json_path = os.path.join(os.path.dirname(os.path.realpath(__file__)), "assets", "bind_matrix_transform.json")
     with open(json_path, "w") as f:
         json.dump(json_data, f, indent=2)

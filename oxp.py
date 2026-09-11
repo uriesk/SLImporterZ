@@ -533,6 +533,8 @@ class OXPParser():
                 for i, material in enumerate(materials):
                     obj.data.materials[i] = material
 
+            self.amount_imported_meshes += len(imported_mesh_objects)
+
 class SLIZ_IMPORT_oxp(bpy.types.Operator, ImportHelper):
     """Import one or more OXP (.oxp) files"""
     bl_idname    = "import_scene.sliz_oxp"
