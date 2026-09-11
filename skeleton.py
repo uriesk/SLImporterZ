@@ -22,26 +22,35 @@ import xml.etree.ElementTree as ET
 import math
 import mathutils
 
+
+Rz90 = mathutils.Matrix((
+       (0.0, 1.0, 0.0, 0.0),
+       (-1.0, 0.0, 0.0, 0.0),
+       (0.0, 0.0, 1.0, 0.0),
+       (0.0, 0.0, 0.0, 1.0)
+       ))
+Rz90I = Rz90.inverted()
+
 def get_skeleton():
-    tree = ET.parse(os.path.join(os.path.dirname(os.path.realpath(__file__)), "avatar_skeleton.xml"))
+    tree = ET.parse(os.path.join(os.path.dirname(os.path.realpath(__file__)), "assets", "avatar_skeleton.xml"))
     root = tree.getroot()
 
+    result = {}
     def getRecursive(bone, parent=None):
-        result = []
+        name = bone.attrib["name"]
         entry = {
-            "name": bone.attrib["name"],
             "group": bone.attrib["group"],
             "pos_orig": [float(i) for i in bone.attrib["pos"].split(" ")],
             "end_orig": [float(i) for i in bone.attrib["end"].split(" ")],
             "rot_orig": [float(i) for i in bone.attrib["rot"].split(" ")],
             "scale_orig": [float(i) for i in bone.attrib["scale"].split(" ")],
-            "parent": parent["name"] if parent else False,
+            "parent": parent or False,
             "connected": bone.attrib.get("connected", "false").lower() == "true",
             "type": bone.tag
         }
 
         if parent:
-            offset = parent["pos"]
+            offset = result[parent]["pos"]
             entry["pos"] = [entry["pos_orig"][i]+offset[i] for i in range(0,3)]
         else:
             entry["pos"] = entry["pos_orig"]
@@ -52,21 +61,21 @@ def get_skeleton():
         entry["scale"] *= mathutils.Matrix.Scale(entry["scale_orig"][2], 4, (0,0,1))
 
         entry["rot"] = mathutils.Euler(entry["rot_orig"], "XYZ").to_matrix().to_4x4()
+        print(name, entry["rot"])
 
         # --- FIX HERE ---
-        # Create rotation from SL Euler angles
-        #sl_rot = mathutils.Euler(entry["rot_orig"], "XYZ").to_matrix().to_4x4()
-        
+        # NOTE: unclear whether or not we have to care about converting it to
+        # X+ forward, which would be z rotation +90 degrees
         # Convert from SL (X+ forward) to Blender (Y+ forward)
         # Rotate -90° around Z
         #conversion = mathutils.Matrix.Rotation(math.radians(-90), 4, 'Z')
-        #entry["rot"] = conversion @ sl_rot @ conversion.inverted()
+        #entry["rot"] = conversion @ entry["rot"] @ conversion.inverted()
         # --- END FIX ---
 
-        result.append(entry)
+        result[name] = entry
         
         for child in bone:
-            result += getRecursive(child, parent=entry)
+            getRecursive(child, parent=name)
         return result
     return getRecursive(root[0])
 
@@ -82,9 +91,9 @@ def add_skeleton(context):
     edit_bones = armature.edit_bones
     pose = armature_obj.pose
     boners = {}
-    for bone in bones:
-        b = edit_bones.new(bone["name"])
-        boners[bone["name"]] = b
+    for bone_name, bone in bones.items():
+        b = edit_bones.new(bone_name)
+        boners[bone_name] = b
         b.head = bone["pos"]
         b.tail = bone["end"]
         if bone["parent"]:
@@ -100,17 +109,15 @@ def add_skeleton(context):
     bone_collection = armature.collections.new(name="bone")
     collision_collection = armature.collections.new(name="collision_volume")
 
-    bone_matrix = {}
-    for bone in bones:
+    for bone_name, bone in bones.items():
         # Assign bones to collections based on type
         if bone["type"] == "collision_volume":
-            armature.collections["collision_volume"].assign(pose.bones[bone["name"]])
+            armature.collections["collision_volume"].assign(pose.bones[bone_name])
         else:
-            armature.collections["bone"].assign(pose.bones[bone["name"]])
-        bone_matrix[bone["name"]] = armature.bones[bone["name"]].matrix_local
+            armature.collections["bone"].assign(pose.bones[bone_name])
 
     armature_obj.location = (0,0,0)
-    return armature_obj, bone_matrix
+    return armature_obj
 
 class SLIZ_ADD_armature(bpy.types.Operator):
     bl_idname = "object.sliz_armature"

@@ -171,6 +171,9 @@ def import_lod_mesh(lod_data, name, **kwargs):
                     [0.0, 0.0, 0.0, 0.0],
                     [0.0, 0.0, 0.0, 0.0]
                 ])
+                # normalizing weights is mostly unneccessary, meshes should never
+                # need this, but firestorm is doing it as well, so we fellow,
+                # just in case that there are broken meshes that indeed need it
                 weight_scale = sum(vertex_weights)
 
                 # a skinning shader
@@ -329,6 +332,7 @@ def import_lod_mesh(lod_data, name, **kwargs):
             obj.location = (prim_position[0], prim_position[1], prim_position[2])
         if prim_rotation:
             obj.rotation_mode = 'QUATERNION'
+            # TODO X+ forward
             obj.rotation_quaternion = (prim_rotation[3], prim_rotation[0], prim_rotation[1], prim_rotation[2])
 
     return obj
@@ -424,21 +428,32 @@ def import_slm(stream, name, **kwargs):
                 if all(joint in existing_bones for joint in joint_names):
                     armature = armature_obj
             if armature is None:
-                armature, _ = skeleton.add_skeleton(bpy.context)
+                armature = skeleton.add_skeleton(bpy.context)
 
             bones = []
             for i, joint_name in enumerate(joint_names):
                 bones.append(armature.data.bones[joint_name])
         if "inverse_bind_matrix" in skin_data:
+            # corret inverse bind matrices according to standard skeleton
+            orig_bones = skeleton.get_skeleton()
+
             inverse_bind_matrices = []
             for i, inverse_bind_matrix in enumerate(skin_data["inverse_bind_matrix"]):
-                bone_matrix = bones[i].matrix_local
+                orig_bone_data = orig_bones[joint_names[i]]
+                orig_bone_position = orig_bone_data["pos"] # xyz vector
+                orig_bone_rotation = orig_bone_data["rot"] # rotation matrix
+                orig_bone_scale = orig_bone_data["scale"] # scaling matrix
+
+                our_bone = bones[i].matrix_local
 
                 inverse_bind_matrix = matrix_from_array(inverse_bind_matrix)
                 bind_matrix = inverse_bind_matrix.inverted()
                 t_target, r_target, s_target = bind_matrix.decompose()
-                t_source, r_source, s_source = bone_matrix.decompose()
-                bind_matrix = Matrix.LocRotScale(t_target, r_target @ r_source, s_source)
+                bind_matrix = Matrix.LocRotScale(
+                    t_target,
+                    r_target @ our_bone.to_quaternion(),
+                    s_target * orig_bone_scale.inverted().to_scale()
+                )
                 inverse_bind_matrix = bind_matrix.inverted()
 
                 inverse_bind_matrices.append(inverse_bind_matrix)
@@ -493,6 +508,13 @@ def import_slm(stream, name, **kwargs):
             )
             if mesh_object is not None:
                 imported_meshe_objects.append(mesh_object)
+
+                if armature is not None:
+                    mesh_object.parent = armature
+                    mesh_object.matrix_parent_inverse = armature.matrix_world.inverted()
+                    mod = mesh_object.modifiers.new(name="Armature", type='ARMATURE')
+                    mod.object = armature
+                    mod.use_vertex_groups = True
     return imported_meshe_objects
 
 class SLIZ_IMPORT_slm(bpy.types.Operator, ImportHelper):
