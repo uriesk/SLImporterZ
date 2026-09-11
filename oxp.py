@@ -44,10 +44,11 @@ class OXPParser():
 
     def parse_from_file(self, filepath):
         self.filepath = filepath
-        # TODO: just for debugging
-        # with tempfile.TemporaryDirectory() as temp_dir:
-        if True:
-            temp_dir = os.path.dirname(filepath)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            if self.create_debug_info:
+                temp_dir = os.path.dirname(filepath)
+
             # OXP is zlib compressed binary llsd
             try:
                 decompressor = zlib.decompressobj()

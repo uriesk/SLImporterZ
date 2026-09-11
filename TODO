@@ -1,4 +1,3 @@
 - Parse Physics shape when it isn't a convex hulls
 - maybe a few more material properties
-- rigging scale
-- temporry folder
+- rigging weird rotation in awatar_skeleton.xml
