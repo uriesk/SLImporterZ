@@ -20,8 +20,6 @@ import bpy
 
 if "bpy" in locals():
     import importlib
-    if "collada" in locals():
-        importlib.reload(collada)
     if "slm" in locals():
         importlib.reload(slm)
     if "oxp" in locals():
@@ -33,7 +31,6 @@ if "bpy" in locals():
     if "skeleton" in locals():
         importlib.reload(skeleton)
 
-from . import collada
 from . import oxp
 from . import slm
 from . import skeleton
@@ -58,12 +55,10 @@ def register():
     bpy.types.TOPBAR_MT_file_import.append(menu_func_import_seperator)
     slm.register()
     oxp.register()
-    collada.register()
     skeleton.register()
 
 def unregister():
     skeleton.unregister()
-    collada.unregister()
     oxp.unregister()
     slm.unregister()
     bpy.types.TOPBAR_MT_file_import.remove(menu_func_import_seperator)
