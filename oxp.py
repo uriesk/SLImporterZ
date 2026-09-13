@@ -492,8 +492,6 @@ class OXPParser():
             collection_name = None
             # get parent_uuid (if in linkset)
             parent_uuid = prim_data.get("parent")
-            if parent_uuid:
-                parent_uuid = parent_uuid
 
             if self.create_collections:
                 collection_name = name
@@ -522,6 +520,8 @@ class OXPParser():
                     extract_lods=self.extract_lods,
                     custom_properties={ "sl_uuid": mesh_uuid },
                     collection_name=collection_name,
+                    prim_position=prim_position,
+                    prim_rotation=prim_rotation,
                     prim_scale=prim_data.get("scale", [1.0, 1.0, 1.0])
                 )
 
@@ -554,7 +554,7 @@ class SLIZ_IMPORT_oxp(bpy.types.Operator, ImportHelper):
         description=(
             "Create a Collection for every imported Linkset"
         ),
-        default=False,
+        default=True,
     )
     extract_lods: bpy.props.BoolProperty(
         name="Load all LOD levels",

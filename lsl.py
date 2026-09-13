@@ -225,21 +225,18 @@ class TEXT_OT_generate_script(bpy.types.Operator):
         self.report({'INFO'}, "Script generated!")
         return {'FINISHED'}
 
-# 2. Create a menu class to hold your operator
 class TEXT_MT_my_generator_menu(bpy.types.Menu):
     bl_label = "LSL"
-    bl_idname = "lsl_generator_menu"
+    bl_idname = "TEXT_MT_lsl_generator_menu"
 
     def draw(self, context):
         layout = self.layout
         layout.operator("text.generate_dynamic_script")
 
-# 3. Create a draw function that adds the menu to the header
 def draw_my_menu(self, context):
     layout = self.layout
     layout.menu(TEXT_MT_my_generator_menu.bl_idname)
 
-# 4. Register and append
 def register():
     bpy.utils.register_class(TEXT_OT_generate_script)
     bpy.utils.register_class(TEXT_MT_my_generator_menu)
