@@ -394,6 +394,7 @@ class OXPParser():
 
             if color_texture:
                 tex_node = nodes.new("ShaderNodeTexImage")
+                tex_node.label = "Base Color Image"
                 tex_node.image = color_texture
                 links.new(tex_node.outputs["Color"], principled.inputs["Base Color"])
                 if color_texture.depth == 32: 
@@ -402,6 +403,7 @@ class OXPParser():
 
             if normal_texture:
                 normal_tex = nodes.new("ShaderNodeTexImage")
+                normal_tex.label = "Normal Map Image"
                 normal_tex.image = normal_texture
                 normal_tex.image.colorspace_settings.name = 'Non-Color'
                 normal_map = nodes.new("ShaderNodeNormalMap")
@@ -412,6 +414,7 @@ class OXPParser():
 
             if orm_texture:
                 orm_node = nodes.new("ShaderNodeTexImage")
+                orm_node.label = "ORM Map Image"
                 orm_node.image = orm_texture
                 orm_node.image.colorspace_settings.name = 'Non-Color'
                 orm_node.location = (-600, -300)
@@ -424,6 +427,7 @@ class OXPParser():
 
             if specular_texture:
                 spec_tex = nodes.new("ShaderNodeTexImage")
+                spec_tex.label = "Specular Map Image"
                 spec_tex.image = specular_texture
                 spec_tex.image.colorspace_settings.name = 'Non-Color'
                 # specular is inverted roughness
@@ -440,6 +444,7 @@ class OXPParser():
 
             if emissive_texture:
                 emissive_node = nodes.new("ShaderNodeTexImage")
+                emissive_node.label = "Emission Map Image"
                 emissive_node.image = emissive_texture
                 emissive_node.image.colorspace_settings.name = 'Non-Color'
                 emissive_node.location = (-300, -500)

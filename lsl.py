@@ -47,12 +47,7 @@ def create_lsl_script():
                 link_num = offset;
             }
 
-            // link 0 is parent prim and its name is the linkset name,
-            // so if it got named different on upload, it won't be available
-            // under its real name anymore, so we choose whatever is left and
-            // seen first, in case we can't find it (i == -1)
-
-            string name = llGetLinkName(i);\n
+            string name = llGetLinkName(link_num);\n
             integer did_set = TRUE;\n"""
     indent = "            "
 
@@ -111,7 +106,7 @@ def create_lsl_script():
             if "sl_fullbright" in material and material["sl_fullbright"] != 0:
                 params.append(f"PRIM_FULLBRIGHT, {i}, {material["sl_fullbright"]}")
             if "sl_glow" in material and material["sl_glow"] != 0.0:
-                params.append(f"PRIM_GLOW, {i}, {material["sl_glow"]}")
+                params.append(f"PRIM_GLOW, {i}, {material["sl_glow"]:.3f}")
 
             # base color
             base_color_input = bsdf_node.inputs.get("Base Color")
@@ -158,8 +153,16 @@ def create_lsl_script():
                         if from_node.bl_idname == "ShaderNodeTexImage":
                             image = from_node.image
                             if "sl_uuid" in image:
-                                # blinn Phong
+                                # blinn phong
                                 # [ string texture, vector repeats, vector offsets, float rotation_in_radians, vector color, integer glossiness integer environment ]
+                                params.append(f"PRIM_SPECULAR, {i}, \"{lsl_escape(image["sl_uuid"])}\", <1.0, 1.0, 0.0>, ZERO_VECTOR, 0.0, <1.0, 1.0, 1.0>, 255, 0")
+                else:
+                    # if roughness is set by pbr material, the blinn phong
+                    # specular map may exist as node but not be connected
+                    for node in nodes:
+                        if node.label == "Specular Map Image":
+                            image = from_node.image
+                            if "sl_uuid" in image:
                                 params.append(f"PRIM_SPECULAR, {i}, \"{lsl_escape(image["sl_uuid"])}\", <1.0, 1.0, 0.0>, ZERO_VECTOR, 0.0, <1.0, 1.0, 1.0>, 255, 0")
 
             # orm map (pbr only)
@@ -203,6 +206,8 @@ def create_lsl_script():
                 return;
             }
         }
+
+        llRemoveInventory(llGetScriptName());
     }
 }"""
     return lsl_text
@@ -213,15 +218,15 @@ class TEXT_OT_generate_script(bpy.types.Operator):
     bl_description = "Generate LSL script that sets textures inworld according to Materials"
 
     def execute(self, context):
-        # Get the text block (create if it doesn't exist)
+        # get or create text block
         text_block = context.space_data.text
         if not text_block:
-            text_block = bpy.data.texts.new("sliz_set_textures.lsl")
+            text_block = bpy.data.texts.new("Set Textures LSL")
             context.space_data.text = text_block
 
         text_block.clear()
         text_block.write(create_lsl_script())
-        
+
         self.report({'INFO'}, "Script generated!")
         return {'FINISHED'}
 
