@@ -30,10 +30,13 @@ if "bpy" in locals():
         importlib.reload(utils)
     if "skeleton" in locals():
         importlib.reload(skeleton)
+    if "lsl" in locals():
+        importlib.reload(lsl)
 
 from . import oxp
 from . import slm
 from . import skeleton
+from . import lsl
 
 class SLIZ_preferences(bpy.types.AddonPreferences):
     bl_idname = __package__
@@ -56,8 +59,10 @@ def register():
     slm.register()
     oxp.register()
     skeleton.register()
+    lsl.register()
 
 def unregister():
+    lsl.unregister()
     skeleton.unregister()
     oxp.unregister()
     slm.unregister()
