@@ -18,13 +18,16 @@
 
 import bpy
 
+from . import utils
+
 
 def lsl_escape(s):
     return s.replace("\\", "\\\\").replace('"', '\\"')
 
 def create_lsl_script():
-    # creates lsl script for setting properties and textures
+    # creates lsl script and object tree for setting properties and textures
     # by uuid
+    objects_tree = {}
     lsl_text = """default
 {
     state_entry()
@@ -56,6 +59,9 @@ def create_lsl_script():
         if obj.type != "MESH":
             continue
 
+        object_tree = []
+        objects_tree[obj.name] = object_tree
+
         if amount_added == 0:
             lsl_text += f"\n{indent}if (name == \"{lsl_escape(obj.name)}\" || (i == -1 && llListFindList(used_names, [\"{lsl_escape(obj.name)}\"]) == -1))\n{indent}{{\n"
         else:
@@ -68,6 +74,8 @@ def create_lsl_script():
 
         for i, material in enumerate(obj.data.materials):
             # recreate face properties based on material
+            face_tree = {}
+            object_tree.append(face_tree)
 
             # pbr material
             is_pbr_material = False
@@ -75,6 +83,7 @@ def create_lsl_script():
             pbr_overrides = []
             if "sl_uuid" in material:
                 is_pbr_material = True
+                face_tree["PBR Material"] = material["sl_uuid"]
                 params.append(f"PRIM_RENDER_MATERIAL, {i}, \"{lsl_escape(material["sl_uuid"])}\"")
                 if "sl_gltf_override" in material:
                     pbr_overrides = json.loads(material["sl_gltf_override"])
@@ -115,6 +124,7 @@ def create_lsl_script():
                 if from_node.bl_idname == "ShaderNodeTexImage":
                     image = from_node.image
                     if "sl_uuid" in image:
+                        face_tree["Base Color Texture"] = image["sl_uuid"]
                         # blinn Phong
                         # [ string texture, vector repeats, vector offsets, float rotation_in_radians ]
                         params.append(f"PRIM_TEXTURE, {i}, \"{lsl_escape(image["sl_uuid"])}\", <1.0, 1.0, 0.0>, ZERO_VECTOR, 0.0")
@@ -134,6 +144,7 @@ def create_lsl_script():
                         if from_node.bl_idname == "ShaderNodeTexImage":
                             image = from_node.image
                             if "sl_uuid" in image:
+                                face_tree["Normal Map Texture"] = image["sl_uuid"]
                                 # blinn Phong
                                 # [ string texture, vector repeats, vector offsets, float rotation_in_radians ]
                                 params.append(f"PRIM_NORMAL, {i}, \"{lsl_escape(image["sl_uuid"])}\", <1.0, 1.0, 0.0>, ZERO_VECTOR, 0.0")
@@ -153,6 +164,7 @@ def create_lsl_script():
                         if from_node.bl_idname == "ShaderNodeTexImage":
                             image = from_node.image
                             if "sl_uuid" in image:
+                                face_tree["Specular Map Texture"] = image["sl_uuid"]
                                 # blinn phong
                                 # [ string texture, vector repeats, vector offsets, float rotation_in_radians, vector color, integer glossiness integer environment ]
                                 params.append(f"PRIM_SPECULAR, {i}, \"{lsl_escape(image["sl_uuid"])}\", <1.0, 1.0, 0.0>, ZERO_VECTOR, 0.0, <1.0, 1.0, 1.0>, 255, 0")
@@ -163,6 +175,7 @@ def create_lsl_script():
                         if node.label == "Specular Map Image":
                             image = from_node.image
                             if "sl_uuid" in image:
+                                face_tree["Specular Map Texture"] = image["sl_uuid"]
                                 params.append(f"PRIM_SPECULAR, {i}, \"{lsl_escape(image["sl_uuid"])}\", <1.0, 1.0, 0.0>, ZERO_VECTOR, 0.0, <1.0, 1.0, 1.0>, 255, 0")
 
             # orm map (pbr only)
@@ -177,6 +190,7 @@ def create_lsl_script():
                             if from_node.bl_idname == "ShaderNodeTexImage":
                                 image = from_node.image
                                 if "sl_uuid" in image:
+                                    face_tree["ORM Map Texture"] = image["sl_uuid"]
                                     # pbr
                                     # [ string texture, vector repeats, vector offsets, float rotation_in_radians, float metallic_factor, float roughness_factor ]
                                     params.append(f"PRIM_GLTF_METALLIC_ROUGHNESS, {i}, \"{lsl_escape(image["sl_uuid"])}\", \"\", \"\", \"\", \"\", \"\"")
@@ -189,6 +203,7 @@ def create_lsl_script():
                     if from_node.bl_idname == "ShaderNodeTexImage":
                         image = from_node.image
                         if "sl_uuid" in image:
+                            face_tree["Emission Map Texture"] = image["sl_uuid"]
                             # pbr
                             #  [ string texture, vector repeats, vector offsets, float rotation_in_radians, vector emissive_tint ]
                             params.append(f"PRIM_GLTF_EMISSIVE, {i}, \"{lsl_escape(image["sl_uuid"])}\", \"\", \"\", \"\", \"\"")
@@ -210,10 +225,10 @@ def create_lsl_script():
         llRemoveInventory(llGetScriptName());
     }
 }"""
-    return lsl_text
+    return lsl_text, objects_tree
     
 class TEXT_OT_generate_script(bpy.types.Operator):
-    bl_idname = "text.generate_dynamic_script"
+    bl_idname = "text.sliz_generate_texture_script"
     bl_label = "Generate Texture Script"
     bl_description = "Generate LSL script that sets textures inworld according to Materials"
 
@@ -225,9 +240,30 @@ class TEXT_OT_generate_script(bpy.types.Operator):
             context.space_data.text = text_block
 
         text_block.clear()
-        text_block.write(create_lsl_script())
+        lsl_text, _ = create_lsl_script()
+        text_block.write(lsl_text)
 
         self.report({'INFO'}, "Script generated!")
+        return {'FINISHED'}
+
+class TEXT_OT_generate_object_tree(bpy.types.Operator):
+    bl_idname = "text.sliz_generate_object_tree"
+    bl_label = "Generate UUID tree"
+    bl_description = "Generate tree showing UUIDs of materials"
+
+    def execute(self, context):
+        # get or create text block
+        text_block = context.space_data.text
+        if not text_block:
+            text_block = bpy.data.texts.new("SL UUIDs")
+            context.space_data.text = text_block
+
+        text_block.clear()
+        _, object_tree = create_lsl_script()
+        tree_text = "\n".join(utils.print_tree(object_tree))
+        text_block.write(tree_text)
+
+        self.report({'INFO'}, "UUID tree generated!")
         return {'FINISHED'}
 
 class TEXT_MT_my_generator_menu(bpy.types.Menu):
@@ -236,13 +272,15 @@ class TEXT_MT_my_generator_menu(bpy.types.Menu):
 
     def draw(self, context):
         layout = self.layout
-        layout.operator("text.generate_dynamic_script")
+        layout.operator("text.sliz_generate_texture_script")
+        layout.operator("text.sliz_generate_object_tree")
 
 def draw_my_menu(self, context):
     layout = self.layout
     layout.menu(TEXT_MT_my_generator_menu.bl_idname)
 
 def register():
+    bpy.utils.register_class(TEXT_OT_generate_object_tree)
     bpy.utils.register_class(TEXT_OT_generate_script)
     bpy.utils.register_class(TEXT_MT_my_generator_menu)
     bpy.types.TEXT_HT_header.append(draw_my_menu)
@@ -251,6 +289,7 @@ def unregister():
     bpy.types.TEXT_HT_header.remove(draw_my_menu)
     bpy.utils.unregister_class(TEXT_MT_my_generator_menu)
     bpy.utils.unregister_class(TEXT_OT_generate_script)
+    bpy.utils.register_class(TEXT_OT_generate_object_tree)
 
 if __name__ == "__main__":
     register()
