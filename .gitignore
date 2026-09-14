@@ -2,8 +2,8 @@ __pycache__/
 *.zip
 references/
 icons/
-*.oxp
-*.slm
+/*.oxp
+/*.slm
 *.bin
 *.slmat
 *_meshtree.txt
