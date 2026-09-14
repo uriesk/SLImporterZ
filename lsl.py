@@ -92,7 +92,6 @@ def create_lsl_script():
             if not material.use_nodes:
                 continue
             nodes = material.node_tree.nodes
-            links = material.node_tree.links
             bsdf_node = None
             for node in nodes:
                 if node.bl_idname == 'ShaderNodeOutputMaterial':
@@ -107,20 +106,45 @@ def create_lsl_script():
 
             # See https://wiki.secondlife.com/wiki/LlSetPrimitiveParams
 
-            # tint color
-            tint_color = bsdf_node.inputs["Base Color"].default_value
-            tint_color = f"<{tint_color[0]:.2f}, {tint_color[1]:.2f}, {tint_color[2]:.2f}>"
-            params.append(f"PRIM_COLOR, {i}, {tint_color}, 1.0")
-
             if "sl_fullbright" in material and material["sl_fullbright"] != 0:
                 params.append(f"PRIM_FULLBRIGHT, {i}, {material["sl_fullbright"]}")
             if "sl_glow" in material and material["sl_glow"] != 0.0:
                 params.append(f"PRIM_GLOW, {i}, {material["sl_glow"]:.3f}")
 
+            # tint color and alpha
+            tint_color = "<1.0, 1.0, 1.0>"
+            alpha = 1.0
+
+            # alpha modes
+            alpha_mode = 0 # OPAQUE
+            alpha_cutoff = 0.0
+            alpha_input = bsdf_node.inputs["Alpha"]
+            if alpha_input.links:
+                from_node = alpha_input.links[0].from_node
+                if from_node.bl_idname == "ShaderNodeMath" and from_node.operation == "MULTIPLY":
+                    alpha = from_node.inputs[1].default_value
+                    from_node_input = from_node.inputs[0]
+                    if from_node_input.links:
+                        from_node = from_node_input.links[0].from_node
+                if from_node.bl_idname == "ShaderNodeTexImage":
+                    alpha_mode = 1 # BLEND
+                elif from_node.bl_idname == "ShaderNodeMath" and from_node.operation == "GREATER_THAN":
+                    alpha_mode = 2 # MASK
+                    alpha_cutoff = from_node.inputs[1].default_value
+            else:
+                alpha = bsdf_node.inputs["Alpha"].default_value
+            params.append(f"PRIM_ALPHA_MODE, {i}, {alpha_mode}, {round(alpha_cutoff * 255)}")
+
             # base color
-            base_color_input = bsdf_node.inputs.get("Base Color")
-            if base_color_input and base_color_input.links:
+            base_color_input = bsdf_node.inputs["Base Color"]
+            if base_color_input.links:
                 from_node = base_color_input.links[0].from_node
+                if from_node.bl_idname == "ShaderNodeMix":
+                    tint_color = from_node.inputs["B"].default_value
+                    tint_color = f"<{tint_color[0]:.2f}, {tint_color[1]:.2f}, {tint_color[2]:.2f}>"
+                    from_node_input = from_node.inputs["A"]
+                    if from_node_input.links:
+                        from_node = from_node_input.links[0].from_node
                 if from_node.bl_idname == "ShaderNodeTexImage":
                     image = from_node.image
                     if "sl_uuid" in image:
@@ -131,11 +155,18 @@ def create_lsl_script():
                         # pbr if overridden
                         if "pbrMetallicRoughness" in pbr_overrides:
                             # [ string texture, vector repeats, vector offsets, float rotation_in_radians, vector color, float alpha, integer gltf_alpha_mode, float alpha_mask_cutoff, integer double_sided ]
-                            params.append(f"PRIM_GLTF_BASE_COLOR, {i}, \"{lsl_escape(image["sl_uuid"])}\", \"\", \"\", \"\", {tint_color}, \"\", \"\", \"\", \"\"")
+                            params.append(f"PRIM_GLTF_BASE_COLOR, {i}, \"{lsl_escape(image["sl_uuid"])}\", \"\", \"\", \"\", {tint_color}, {alpha:.2f}, {alpha_mode}, {alpha_cutoff:.2f}, \"\"")
+            else:
+                tint_color = bsdf_node.inputs["Base Color"].default_value
+                tint_color = f"<{tint_color[0]:.2f}, {tint_color[1]:.2f}, {tint_color[2]:.2f}>"
+                if "pbrMetallicRoughness" in pbr_overrides:
+                    params.append(f"PRIM_GLTF_BASE_COLOR, {i}, \"\", \"\", \"\", \"\", {tint_color}, {alpha:.2f}, {alpha_mode}, {alpha_cutoff:.2f}, \"\"")
+
+            params.append(f"PRIM_COLOR, {i}, {tint_color}, {alpha:.2f}")
 
             # normal map
-            normal_input = bsdf_node.inputs.get("Normal")
-            if normal_input and normal_input.links:
+            normal_input = bsdf_node.inputs["Normal"]
+            if normal_input.links:
                 normal_input_node = normal_input.links[0].from_node
                 if normal_input_node.bl_idname == "ShaderNodeNormalMap":
                     normal_color_input = normal_input_node.inputs.get("Color")
@@ -154,8 +185,8 @@ def create_lsl_script():
                                     params.append(f"PRIM_GLTF_NORMAL, {i}, \"{lsl_escape(image["sl_uuid"])}\", \"\", \"\", \"\"")
 
             # specular map  (blinn phong only, notice by invert color node)
-            roughness_input = bsdf_node.inputs.get("Roughness")
-            if roughness_input and roughness_input.links:
+            roughness_input = bsdf_node.inputs["Roughness"]
+            if roughness_input.links:
                 invert_input = roughness_input.links[0].from_node
                 if invert_input.bl_idname == "ShaderNodeInvert":
                     specular_color_input = invert_input.inputs.get("Color")
@@ -179,9 +210,10 @@ def create_lsl_script():
                                 params.append(f"PRIM_SPECULAR, {i}, \"{lsl_escape(image["sl_uuid"])}\", <1.0, 1.0, 0.0>, ZERO_VECTOR, 0.0, <1.0, 1.0, 1.0>, 255, 0")
 
             # orm map (pbr only)
+            orm_texture = ""
             if "occlusionTexture" in pbr_overrides:
-                orm_input = bsdf_node.inputs.get("Metallic")
-                if orm_input and orm_input.links:
+                orm_input = bsdf_node.inputs["Metallic"]
+                if orm_input.links:
                     split_input = orm_input.links[0].from_node
                     if split_input.bl_idname == "ShaderNodeSeparateColor":
                         orm_color_input = split_input.inputs.get("Color")
@@ -191,9 +223,16 @@ def create_lsl_script():
                                 image = from_node.image
                                 if "sl_uuid" in image:
                                     face_tree["ORM Map Texture"] = image["sl_uuid"]
-                                    # pbr
-                                    # [ string texture, vector repeats, vector offsets, float rotation_in_radians, float metallic_factor, float roughness_factor ]
-                                    params.append(f"PRIM_GLTF_METALLIC_ROUGHNESS, {i}, \"{lsl_escape(image["sl_uuid"])}\", \"\", \"\", \"\", \"\", \"\"")
+                                    orm_texture = lsl_escape(image["sl_uuid"])
+            metallic_factor = "\"\""
+            roughness_factor = "\"\""
+            if "pbrMetallicRoughness" in pbr_overrides:
+                metallic_factor = f"{bsdf_node.inputs["Metallic"].default_value:.2f}"
+                roughness_factor = f"{bsdf_node.inputs["Roughness"].default_value:.2f}"
+            if orm_texture or metallic_factor != "\"\"" or roughness_factor != "\"\"":
+                # pbr
+                # [ string texture, vector repeats, vector offsets, float rotation_in_radians, float metallic_factor, float roughness_factor ]
+                params.append(f"PRIM_GLTF_METALLIC_ROUGHNESS, {i}, \"{orm_texture}\", \"\", \"\", \"\", {metallic_factor}, {roughness_factor}")
 
             # emissive map (pbr only)
             if "emissiveTexture" in pbr_overrides:
@@ -289,7 +328,7 @@ def unregister():
     bpy.types.TEXT_HT_header.remove(draw_my_menu)
     bpy.utils.unregister_class(TEXT_MT_my_generator_menu)
     bpy.utils.unregister_class(TEXT_OT_generate_script)
-    bpy.utils.register_class(TEXT_OT_generate_object_tree)
+    bpy.utils.unregister_class(TEXT_OT_generate_object_tree)
 
 if __name__ == "__main__":
     register()

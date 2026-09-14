@@ -337,14 +337,15 @@ class OXPParser():
             #     metallicFactor: float
             #     roughnessFactor: float
             #   }
+            #   alphaMode: str [ BLEND | MASK | OPAQUE ]
             #   alphaCutoff: float
 
             # create basic nodes
             nodes.clear()
             output = nodes.new("ShaderNodeOutputMaterial")
             principled = nodes.new("ShaderNodeBsdfPrincipled")
-            output.location = (300, 0)
-            principled.location = (0, 0)
+            output.location = (600, 0)
+            principled.location = (300, 0)
             links.new(principled.outputs["BSDF"], output.inputs["Surface"])
 
             # texture uuids
@@ -356,6 +357,21 @@ class OXPParser():
 
             # base values
             base_color_tint = texture_data.get("colors", [1.0, 1.0, 1.0, 1.0])
+            alpha = base_color_tint[3]
+            alpha_mode = material_data.get("DiffuseAlphaMode", 0)
+            match alpha_mode:
+                case 0:
+                    alpha_mode = "OPAQUE"
+                case 1:
+                    alpha_mode = "BLEND"
+                case 2:
+                    alpha_mode = "MASK"
+                case _:
+                    # EMISSIVE would be 3, but we can't represent that
+                    alpha_mode = "BLEND"
+            # int 0 to 255
+            alpha_cutoff = material_data.get("AlphaMaskCutoff", 0)
+            alpha_cutoff /= 255
 
             if pbr_material:
                 pbr_metallic_roughness = pbr_material.get("pbrMetallicRoughness")
@@ -379,11 +395,13 @@ class OXPParser():
                         emission_factor.append(1.0)
                     principled.inputs["Emission Color"].default_value = emission_factor
 
+                if "alphaMode" in pbr_material:
+                    alpha_mode = pbr_material.get("alphaMode", "BLEND")
+                if "alphaCutoff" in pbr_material:
+                    alpha_cutoff = pbr_material.get("alphaCutoff", 0.0)
+
             mat["sl_fullbright"] = texture_data.get("fullbright", 0)
             mat["sl_glow"] = texture_data.get("glow", 0.0)
-            # TODO could multiply this on color_texture,
-            # hoever, it is easier to recreate when on the default value
-            principled.inputs["Base Color"].default_value = base_color_tint
 
             # uuids to image
             color_texture = self.get_texture(color_texture, material_name)
@@ -392,14 +410,51 @@ class OXPParser():
             emissive_texture = self.get_texture(emissive_texture, material_name + "_e")
             orm_texture = self.get_texture(orm_texture, material_name + "_orm")
 
+            vertical_start = 260
+            # multply node for tint color
+            multiply_node = None
+            alpha_multiply_node = None
+            if (base_color_tint[0] != 1.0 or base_color_tint[1] != 1.0 or base_color_tint[2] != 1.0) and color_texture:
+                multiply_node = nodes.new("ShaderNodeMix")
+                multiply_node.blend_type = "MULTIPLY"
+                multiply_node.data_type = "RGBA"
+                multiply_node.label = "Tint Color"
+                multiply_node.location = (-100, vertical_start)
+                links.new(multiply_node.outputs["Result"], principled.inputs["Base Color"])
+                multiply_node.inputs["B"].default_value = base_color_tint
+            else:
+                principled.inputs["Base Color"].default_value = base_color_tint
+            if alpha != 1.0 and color_texture and alpha_mode != "OPAQUE":
+                alpha_multiply_node = nodes.new("ShaderNodeMath")
+                alpha_multiply_node.operation = "MULTIPLY"
+                alpha_multiply_node.label = "Alpha Factor"
+                alpha_multiply_node.location = (70, vertical_start - 120)
+                links.new(alpha_multiply_node.outputs["Value"], principled.inputs["Alpha"])
+                alpha_multiply_node.inputs[1].default_value = alpha
+                alpha_multiply_node.use_clamp = True
+            else:
+                principled.inputs["Alpha"].default_value = alpha
+
             if color_texture:
                 tex_node = nodes.new("ShaderNodeTexImage")
                 tex_node.label = "Base Color Image"
                 tex_node.image = color_texture
-                links.new(tex_node.outputs["Color"], principled.inputs["Base Color"])
-                if color_texture.depth == 32: 
-                    links.new(tex_node.outputs["Alpha"], principled.inputs["Alpha"])
-                tex_node.location = (-300, 300)
+                color_input_node = principled.inputs["Base Color"] if multiply_node is None else multiply_node.inputs["A"]
+                alpha_input_node = principled.inputs["Alpha"] if alpha_multiply_node is None else alpha_multiply_node.inputs[0]
+
+                links.new(tex_node.outputs["Color"], color_input_node)
+                if alpha_mode == "BLEND": 
+                    links.new(tex_node.outputs["Alpha"], alpha_input_node)
+                elif alpha_mode == "MASK":
+                    greater_than_node = nodes.new("ShaderNodeMath")
+                    greater_than_node.operation = "GREATER_THAN"
+                    greater_than_node.label = "Alpha Cutoff"
+                    greater_than_node.location = (-270, vertical_start - 120)
+                    links.new(greater_than_node.outputs["Value"], alpha_input_node)
+                    links.new(tex_node.outputs["Alpha"], greater_than_node.inputs[0])
+                    greater_than_node.inputs[1].default_value = alpha_cutoff
+                tex_node.location = (-600, vertical_start)
+                vertical_start -= 280
 
             if normal_texture:
                 normal_tex = nodes.new("ShaderNodeTexImage")
@@ -409,21 +464,23 @@ class OXPParser():
                 normal_map = nodes.new("ShaderNodeNormalMap")
                 links.new(normal_tex.outputs["Color"], normal_map.inputs["Color"])
                 links.new(normal_map.outputs["Normal"], principled.inputs["Normal"])
-                normal_tex.location = (-600, -20)
-                normal_map.location = (-250, -15)
+                normal_tex.location = (-600, vertical_start)
+                normal_map.location = (-250, vertical_start)
+                vertical_start -= 280
 
             if orm_texture:
                 orm_node = nodes.new("ShaderNodeTexImage")
                 orm_node.label = "ORM Map Image"
                 orm_node.image = orm_texture
                 orm_node.image.colorspace_settings.name = 'Non-Color'
-                orm_node.location = (-600, -300)
+                orm_node.location = (-600, vertical_start)
                 # split RGB channels
                 separate = nodes.new("ShaderNodeSeparateColor")
-                separate.location =  (-300, -260)
+                separate.location =  (-250, vertical_start)
                 links.new(orm_node.outputs["Color"], separate.inputs["Color"])
                 links.new(separate.outputs["Green"], principled.inputs["Roughness"])
                 links.new(separate.outputs["Blue"], principled.inputs["Metallic"])
+                vertical_start -= 280
 
             if specular_texture:
                 spec_tex = nodes.new("ShaderNodeTexImage")
@@ -433,22 +490,20 @@ class OXPParser():
                 # specular is inverted roughness
                 invert = nodes.new("ShaderNodeInvert")
                 links.new(spec_tex.outputs["Color"], invert.inputs["Color"])
-                if orm_texture:
+                spec_tex.location = (-600, vertical_start)
+                invert.location = (-250, vertical_start)
+                if not orm_texture:
                     # move it out of the way and don't connect if if orm exists
-                    spec_tex.location = (-600, -600)
-                    invert.location = (-300, -560)
-                else:
-                    spec_tex.location = (-600, -300)
-                    invert.location = (-300, -260)
                     links.new(invert.outputs["Color"], principled.inputs["Roughness"])
+                vertical_start -= 280
 
             if emissive_texture:
                 emissive_node = nodes.new("ShaderNodeTexImage")
                 emissive_node.label = "Emission Map Image"
                 emissive_node.image = emissive_texture
                 emissive_node.image.colorspace_settings.name = 'Non-Color'
-                emissive_node.location = (-300, -500)
-                links.new(emissive_node.outputs["Color"], principled.inputs["Emission"])
+                emissive_node.location = (-600, vertical_start)
+                links.new(emissive_node.outputs["Color"], principled.inputs["Emission Color"])
 
             materials.append(mat)
         return materials

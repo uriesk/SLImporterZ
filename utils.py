@@ -37,19 +37,19 @@ def print_tree(data, indent="", prefix="", is_last=True):
         for i, key in enumerate(keys):
             is_last_key = (i == len(keys) - 1)
             value = data[key]
-            
+
             connector = "└── " if is_last_key else "├── "
             lines.append(f"{indent}{connector}{key}: {type(value).__name__}")
             
             new_indent = indent + ("    " if is_last_key else "│   ")
-            lines.extend(print_tree(value, new_indent, prefix + key, is_last_key))
+            lines.extend(print_tree(value, new_indent, prefix + str(key), is_last_key))
 
     elif isinstance(data, list):
         lines.append(f"{indent}└── (List with {len(data)} items)")
         for i, item in enumerate(data[:10]):
             is_last_item = (i == min(9, len(data) - 1))
             connector = "└── " if is_last_item else "├── "
-            
+
             if isinstance(item, dict):
                 lines.append(f"{indent}    {connector}[{i}] Map ({len(item)} keys)")
                 lines.extend(print_tree(item, indent + "    ", f"[{i}]", is_last_item))
