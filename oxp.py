@@ -800,11 +800,6 @@ class SLIZ_IMPORT_oxp(bpy.types.Operator, ImportHelper):
         self._batch_mode = len(filepaths) > 1
         successes = []
         failures = []
-        parent_collection = (
-            context.view_layer.active_layer_collection.collection
-            if context.view_layer.active_layer_collection
-            else context.scene.collection
-        )
 
         try:
             for filepath in filepaths:
@@ -814,17 +809,6 @@ class SLIZ_IMPORT_oxp(bpy.types.Operator, ImportHelper):
                 self._last_import_error = None
                 self._last_import_summary = None
                 self._import_stage = "starting"
-                self._target_collection = None
-
-                if self._batch_mode and self.batch_create_collections:
-                    collection_name = os.path.splitext(
-                        os.path.basename(filepath)
-                    )[0]
-                    target_collection = bpy.data.collections.new(
-                        collection_name
-                    )
-                    parent_collection.children.link(target_collection)
-                    self._target_collection = target_collection
 
                 started = time.perf_counter()
                 try:
@@ -849,14 +833,9 @@ class SLIZ_IMPORT_oxp(bpy.types.Operator, ImportHelper):
                             or f"Import stopped during {self._import_stage}",
                         )
                     )
-                    target = self._target_collection
-                    if target is not None and not target.objects:
-                        parent_collection.children.unlink(target)
-                        bpy.data.collections.remove(target)
         finally:
             self.filepath = original_filepath
             self._batch_mode = False
-            self._target_collection = None
 
         if len(filepaths) == 1:
             if failures:
