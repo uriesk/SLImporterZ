@@ -192,18 +192,31 @@ class OXPParser():
             return None
 
     def _resolve_textures_in_gltf_material(self, data, textures_data, images_data):
-        # takes gltf_data dict and resoles textures to their uris
-        # texture keys are in the form of xxxxxTexture: { index }
+        # Takes gltf_data dict and resoles textures to their uris
+        # texture keys are in the form of xxxxxTexture: { index }.
+        # Also resolves their trnsforms and stores them as tuples in
+        # xxxxxTextureTransform
         # material -> texures -> images -> uri
         if isinstance(data, dict):
+            added = {};
             for key in data.keys():
                 if key.endswith("Texture"):
                     texture_data = data[key]
                     if isinstance(texture_data, dict):
                         tex_ind = texture_data.get("index")
+                        extensions = texture_data.get("extensions")
+                        if extensions is not None:
+                            transforms = extensions.get("KHR_texture_transform")
+                            if transforms is not None:
+                                offsets = transforms.get("offset", [0.0, 0.0])
+                                scale = transforms.get("scale", [1.0, 1.0])
+                                rotation = transforms.get("rotation", 0.0)
+                                added[key + "Transform"] = (offsets[0], offsets[1], scale[0], scale[1], rotation)
                         if tex_ind is not None:
                             src_ind = textures_data[tex_ind]["source"]
                             data[key] = images_data[src_ind]["uri"]
+            for key, value in added.items():
+                data[key] = value
             for value in data.values():
                 self._resolve_textures_in_gltf_material(value, textures_data, images_data)
         elif isinstance(data, list):
@@ -292,11 +305,14 @@ class OXPParser():
                         if isinstance(pbr_material_ref, dict):
                             te_idx = pbr_material_ref.get("te_idx")
                             uuid = pbr_material_ref.get("id")
-                            if te_idx is not None and uuid:
+                            if te_idx is not None and uuid and uuid != "00000000-0000-0000-0000-000000000000":
                                 pbr_material = self._get_pbr_material(uuid)
                                 if pbr_material:
                                     pbr_material["sl_uuid"] = uuid
                                     pbr_render_materials[te_idx] = pbr_material
+                                else:
+                                    # material that exists but we dont have
+                                    pbr_render_materials[te_idx] = { "sl_uuid": uuid }
 
         if not pbr_render_materials and not materials_data and not textures_data:
             return materials
@@ -355,6 +371,48 @@ class OXPParser():
             emissive_texture = None
             orm_texture = None
 
+            # offsets, scale and rotation
+            # base color
+            color_texture_os = texture_data.get("offsets", 0.0)
+            color_texture_ot = texture_data.get("offsett", 0.0)
+            color_texture_ss = texture_data.get("scales", 1.0)
+            color_texture_st = texture_data.get("scalet", 1.0)
+            color_texture_rot = texture_data.get("imagerot", 0.0)
+            # normal
+            normal_texture_os = material_data.get("NormOffsetX", 0)
+            normal_texture_ot = material_data.get("NormOffsetY", 0)
+            normal_texture_ss = material_data.get("NormRepeatX", 10000)
+            normal_texture_st = material_data.get("NormRepeatY", 10000)
+            normal_texture_rot = material_data.get("NormRotation", 0)
+            normal_texture_os /= 10000.0
+            normal_texture_ot /= 10000.0
+            normal_texture_ss /= 10000.0
+            normal_texture_st /= 10000.0
+            normal_texture_rot /= 10000.0
+            # specular
+            specular_texture_os = material_data.get("SpecOffsetX", 0)
+            specular_texture_ot = material_data.get("SpecOffsetY", 0)
+            specular_texture_ss = material_data.get("SpecRepeatX", 10000)
+            specular_texture_st = material_data.get("SpecRepeatY", 10000)
+            specular_texture_rot = material_data.get("SpecRotation", 0)
+            specular_texture_os /= 10000.0
+            specular_texture_ot /= 10000.0
+            specular_texture_ss /= 10000.0
+            specular_texture_st /= 10000.0
+            specular_texture_rot /= 10000.0
+            # orm
+            orm_texture_os = 0.0
+            orm_texture_ot = 0.0
+            orm_texture_ss = 1.0
+            orm_texture_st = 1.0
+            orm_texture_rot = 0.0
+            # emissive
+            emissive_texture_os = 0.0
+            emissive_texture_ot = 0.0
+            emissive_texture_ss = 1.0
+            emissive_texture_st = 1.0
+            emissive_texture_rot = 0.0
+
             # base values
             base_color_tint = texture_data.get("colors", [1.0, 1.0, 1.0, 1.0])
             alpha = base_color_tint[3]
@@ -377,14 +435,22 @@ class OXPParser():
                 pbr_metallic_roughness = pbr_material.get("pbrMetallicRoughness")
                 if isinstance(pbr_metallic_roughness, dict):
                     color_texture = pbr_metallic_roughness.get("baseColorTexture", color_texture)
+                    if color_texture:
+                        color_texture_os, color_texture_ot, color_texture_ss, color_texture_st, color_texture_rot = pbr_metallic_roughness.get("baseColorTextureTransform", (0.0, 0.0, 1.0, 1.0, 0.0))
                     base_color_tint = pbr_metallic_roughness.get("baseColorFactor", base_color_tint)
                     if "metallicFactor" in pbr_metallic_roughness:
                         principled.inputs["Metallic"].default_value = pbr_metallic_roughness["metallicFactor"]
                     if "roughnessFactor" in pbr_metallic_roughness:
                         principled.inputs["Roughness"].default_value = pbr_metallic_roughness["roughnessFactor"]
                 normal_texture = pbr_material.get("normalTexture", normal_texture)
+                if normal_texture:
+                    normal_texture_os, normal_texture_ot, normal_texture_ss, normal_texture_st, normal_texture_rot = pbr_material.get("normalTextureTransform", (0.0, 0.0, 1.0, 1.0, 0.0))
                 orm_texture = pbr_material.get("occlusionTexture")
+                if orm_texture and "occlusionTextureTransform" in pbr_material:
+                    orm_texture_os, orm_texture_ot, orm_texture_ss, orm_texture_st, orm_texture_rot = pbr_material["occlusionTextureTransform"]
                 emissive_texture = pbr_material.get("emissiveTexture")
+                if emissive_texture and "emissiveTextureTransform" in pbr_material:
+                    emissive_texture_os, emissive_texture_ot, emissive_texture_ss, emissive_texture_st, emissive_texture_rot = pbr_material["emissiveTextureTransform"]
                 if "sl_uuid" in pbr_material:
                     mat["sl_uuid"] = pbr_material["sl_uuid"]
                 if "sl_name" in pbr_material:
@@ -400,8 +466,23 @@ class OXPParser():
                 if "alphaCutoff" in pbr_material:
                     alpha_cutoff = pbr_material.get("alphaCutoff", 0.0)
 
+            # NOTE: Did not find a way to represent those in blender without
+            # losing other informaion, so we store them in custom properties.
+            # The least we have to store this way, the better.
+            # Fullbright could be base_color -> emission link with emission
+            # intensity to 1.0, but that would override the emission map.
+            # We don't have any proper represenation of specular, because PBR
+            # would override this anyway.
             mat["sl_fullbright"] = texture_data.get("fullbright", 0)
             mat["sl_glow"] = texture_data.get("glow", 0.0)
+            spec_color = material_data.get("SpecColor", [255, 255, 255, 255]);
+            spec_glossiness = material_data.get("SpecExp", 51);
+            spec_environment = material_data.get("EnvIntensity", 0);
+            mat["sl_specular_props"] = json.dumps({
+                "color": [spec_color[0] / 255, spec_color[1] / 255, spec_color[2] / 255],
+                "glossiness": spec_glossiness,
+                "environment": spec_environment
+            })
 
             # uuids to image
             color_texture = self.get_texture(color_texture, material_name)
@@ -439,6 +520,7 @@ class OXPParser():
                 tex_node = nodes.new("ShaderNodeTexImage")
                 tex_node.label = "Base Color Image"
                 tex_node.image = color_texture
+                tex_node.location = (-600, vertical_start)
                 color_input_node = principled.inputs["Base Color"] if multiply_node is None else multiply_node.inputs["A"]
                 alpha_input_node = principled.inputs["Alpha"] if alpha_multiply_node is None else alpha_multiply_node.inputs[0]
 
@@ -453,7 +535,18 @@ class OXPParser():
                     links.new(greater_than_node.outputs["Value"], alpha_input_node)
                     links.new(tex_node.outputs["Alpha"], greater_than_node.inputs[0])
                     greater_than_node.inputs[1].default_value = alpha_cutoff
-                tex_node.location = (-600, vertical_start)
+                if color_texture_os != 0.0 or color_texture_ot != 0.0 or color_texture_ss != 1.0 or color_texture_st != 1.0 or color_texture_rot != 0.0:
+                    # need to transform
+                    texcoord = nodes.new("ShaderNodeTexCoord")
+                    texcoord.location = (-1000, vertical_start)
+                    mapping_node = nodes.new("ShaderNodeMapping")
+                    mapping_node.vector_type = "POINT"
+                    mapping_node.location = (-800, vertical_start)
+                    links.new(texcoord.outputs["UV"], mapping_node.inputs["Vector"])
+                    links.new(mapping_node.outputs["Vector"], tex_node.inputs["Vector"])
+                    mapping_node.inputs["Location"].default_value = (color_texture_os, color_texture_ot, 0.0)
+                    mapping_node.inputs["Scale"].default_value    = (color_texture_ss, color_texture_st, 1.0)
+                    mapping_node.inputs["Rotation"].default_value = (0.0, 0.0, color_texture_rot)
                 vertical_start -= 280
 
             if normal_texture:
@@ -466,6 +559,18 @@ class OXPParser():
                 links.new(normal_map.outputs["Normal"], principled.inputs["Normal"])
                 normal_tex.location = (-600, vertical_start)
                 normal_map.location = (-250, vertical_start)
+                if normal_texture_os != 0.0 or normal_texture_ot != 0.0 or normal_texture_ss != 1.0 or normal_texture_st != 1.0 or normal_texture_rot != 0.0:
+                    # need to transform
+                    texcoord = nodes.new("ShaderNodeTexCoord")
+                    texcoord.location = (-1000, vertical_start)
+                    mapping_node = nodes.new("ShaderNodeMapping")
+                    mapping_node.vector_type = 'POINT'           # important
+                    mapping_node.location = (-800, vertical_start)
+                    links.new(texcoord.outputs["UV"], mapping_node.inputs["Vector"])
+                    links.new(mapping_node.outputs["Vector"], normal_tex.inputs["Vector"])
+                    mapping_node.inputs["Location"].default_value = (normal_texture_os, normal_texture_ot, 0.0)
+                    mapping_node.inputs["Scale"].default_value    = (normal_texture_ss, normal_texture_st, 1.0)
+                    mapping_node.inputs["Rotation"].default_value = (0.0, 0.0, normal_texture_rot)
                 vertical_start -= 280
 
             if orm_texture:
@@ -480,6 +585,18 @@ class OXPParser():
                 links.new(orm_node.outputs["Color"], separate.inputs["Color"])
                 links.new(separate.outputs["Green"], principled.inputs["Roughness"])
                 links.new(separate.outputs["Blue"], principled.inputs["Metallic"])
+                if orm_texture_os != 0.0 or orm_texture_ot != 0.0 or orm_texture_ss != 1.0 or orm_texture_st != 1.0 or orm_texture_rot != 0.0:
+                    # need to transform
+                    texcoord = nodes.new("ShaderNodeTexCoord")
+                    texcoord.location = (-1000, vertical_start)
+                    mapping_node = nodes.new("ShaderNodeMapping")
+                    mapping_node.vector_type = 'POINT'           # important
+                    mapping_node.location = (-800, vertical_start)
+                    links.new(texcoord.outputs["UV"], mapping_node.inputs["Vector"])
+                    links.new(mapping_node.outputs["Vector"], orm_node.inputs["Vector"])
+                    mapping_node.inputs["Location"].default_value = (orm_texture_os, orm_texture_ot, 0.0)
+                    mapping_node.inputs["Scale"].default_value    = (orm_texture_ss, orm_texture_st, 1.0)
+                    mapping_node.inputs["Rotation"].default_value = (0.0, 0.0, orm_texture_rot)
                 vertical_start -= 280
 
             if specular_texture:
@@ -495,6 +612,18 @@ class OXPParser():
                 if not orm_texture:
                     # move it out of the way and don't connect if if orm exists
                     links.new(invert.outputs["Color"], principled.inputs["Roughness"])
+                if specular_texture_os != 0.0 or specular_texture_ot != 0.0 or specular_texture_ss != 1.0 or specular_texture_st != 1.0 or specular_texture_rot != 0.0:
+                    # need to transform
+                    texcoord = nodes.new("ShaderNodeTexCoord")
+                    texcoord.location = (-1000, vertical_start)
+                    mapping_node = nodes.new("ShaderNodeMapping")
+                    mapping_node.vector_type = 'POINT'           # important
+                    mapping_node.location = (-800, vertical_start)
+                    links.new(texcoord.outputs["UV"], mapping_node.inputs["Vector"])
+                    links.new(mapping_node.outputs["Vector"], spec_tex.inputs["Vector"])
+                    mapping_node.inputs["Location"].default_value = (specular_texture_os, specular_texture_ot, 0.0)
+                    mapping_node.inputs["Scale"].default_value    = (specular_texture_ss, specular_texture_st, 1.0)
+                    mapping_node.inputs["Rotation"].default_value = (0.0, 0.0, specular_texture_rot)
                 vertical_start -= 280
 
             if emissive_texture:
@@ -504,6 +633,18 @@ class OXPParser():
                 emissive_node.image.colorspace_settings.name = 'Non-Color'
                 emissive_node.location = (-600, vertical_start)
                 links.new(emissive_node.outputs["Color"], principled.inputs["Emission Color"])
+                if emissive_texture_os != 0.0 or emissive_texture_ot != 0.0 or emissive_texture_ss != 1.0 or emissive_texture_st != 1.0 or emissive_texture_rot != 0.0:
+                    # need to transform
+                    texcoord = nodes.new("ShaderNodeTexCoord")
+                    texcoord.location = (-1000, vertical_start)
+                    mapping_node = nodes.new("ShaderNodeMapping")
+                    mapping_node.vector_type = 'POINT'           # important
+                    mapping_node.location = (-800, vertical_start)
+                    links.new(texcoord.outputs["UV"], mapping_node.inputs["Vector"])
+                    links.new(mapping_node.outputs["Vector"], emissive_node.inputs["Vector"])
+                    mapping_node.inputs["Location"].default_value = (emissive_texture_os, emissive_texture_ot, 0.0)
+                    mapping_node.inputs["Scale"].default_value    = (emissive_texture_ss, emissive_texture_st, 1.0)
+                    mapping_node.inputs["Rotation"].default_value = (0.0, 0.0, emissive_texture_rot)
 
             materials.append(mat)
         return materials

@@ -17,6 +17,7 @@
 '''
 
 import bpy
+import json
 
 from . import utils
 
@@ -24,11 +25,30 @@ from . import utils
 def lsl_escape(s):
     return s.replace("\\", "\\\\").replace('"', '\\"')
 
+def _get_trans(node):
+    # get translation from image node
+    texture_os = 0.0
+    texture_ot = 0.0
+    texture_ss = 1.0
+    texture_st = 1.0
+    texture_rot = 0.0
+    if node.inputs["Vector"].links:
+        mapping_node = node.inputs["Vector"].links[0].from_node
+        if mapping_node.bl_idname == "ShaderNodeMapping":
+            texture_os, texture_ot, _ = mapping_node.inputs["Location"].default_value
+            texture_ss, texture_st, _ = mapping_node.inputs["Scale"].default_value
+            _, _, texture_rot = mapping_node.inputs["Rotation"].default_value
+
+    return (f"{texture_os:.6f}", f"{texture_ot:.6f}", f"{texture_ss:.6f}", f"{texture_st:.6f}", f"{texture_rot:.3f}")
+
 def create_lsl_script():
     # creates lsl script and object tree for setting properties and textures
     # by uuid
     objects_tree = {}
-    lsl_text = """default
+    lsl_text = """vector WHITE = <1.0, 1.0, 1.0>;
+string EMPTY_STRING = "";
+
+default
 {
     state_entry()
     {
@@ -50,7 +70,7 @@ def create_lsl_script():
                 link_num = offset;
             }
 
-            string name = llGetLinkName(link_num);\n
+            string name = llGetLinkName(link_num);
             integer did_set = TRUE;\n"""
     indent = "            "
 
@@ -67,6 +87,7 @@ def create_lsl_script():
         else:
             lsl_text += f"\n{indent}else if (name == \"{lsl_escape(obj.name)}\" || (i == -1 && llListFindList(used_names, [\"{lsl_escape(obj.name)}\"]) == -1))\n{indent}{{\n"
         subindent = indent + "    "
+        parindent = subindent + "    "
         lsl_text += f"{subindent}used_names += [\"{lsl_escape(obj.name)}\"];\n"
         amount_added += 1
 
@@ -84,7 +105,7 @@ def create_lsl_script():
             if "sl_uuid" in material:
                 is_pbr_material = True
                 face_tree["PBR Material"] = material["sl_uuid"]
-                params.append(f"PRIM_RENDER_MATERIAL, {i}, \"{lsl_escape(material["sl_uuid"])}\"")
+                params.append(f"\n{parindent}PRIM_RENDER_MATERIAL, {i}, \"{lsl_escape(material["sl_uuid"])}\"")
                 if "sl_gltf_override" in material:
                     pbr_overrides = json.loads(material["sl_gltf_override"])
 
@@ -92,33 +113,33 @@ def create_lsl_script():
             if not material.use_nodes:
                 continue
             nodes = material.node_tree.nodes
-            bsdf_node = None
+            principled = None
             for node in nodes:
                 if node.bl_idname == 'ShaderNodeOutputMaterial':
                     surface_input = node.inputs.get('Surface')
                     if surface_input and surface_input.links:
                         from_node = surface_input.links[0].from_node
                         if from_node.bl_idname == 'ShaderNodeBsdfPrincipled':
-                            bsdf_node = from_node
+                            principled = from_node
                     break
-            if not bsdf_node:
+            if not principled:
                 continue
 
             # See https://wiki.secondlife.com/wiki/LlSetPrimitiveParams
 
             if "sl_fullbright" in material and material["sl_fullbright"] != 0:
-                params.append(f"PRIM_FULLBRIGHT, {i}, {material["sl_fullbright"]}")
+                params.append(f"\n{parindent}PRIM_FULLBRIGHT, {i}, TRUE")
             if "sl_glow" in material and material["sl_glow"] != 0.0:
-                params.append(f"PRIM_GLOW, {i}, {material["sl_glow"]:.3f}")
+                params.append(f"\n{parindent}PRIM_GLOW, {i}, {material["sl_glow"]:.3f}")
 
             # tint color and alpha
-            tint_color = "<1.0, 1.0, 1.0>"
+            tint_color = "WHITE"
             alpha = 1.0
 
             # alpha modes
-            alpha_mode = 0 # OPAQUE
+            alpha_mode = "PRIM_ALPHA_MODE_NONE"
             alpha_cutoff = 0.0
-            alpha_input = bsdf_node.inputs["Alpha"]
+            alpha_input = principled.inputs["Alpha"]
             if alpha_input.links:
                 from_node = alpha_input.links[0].from_node
                 if from_node.bl_idname == "ShaderNodeMath" and from_node.operation == "MULTIPLY":
@@ -127,16 +148,16 @@ def create_lsl_script():
                     if from_node_input.links:
                         from_node = from_node_input.links[0].from_node
                 if from_node.bl_idname == "ShaderNodeTexImage":
-                    alpha_mode = 1 # BLEND
+                    alpha_mode = "PRIM_ALPHA_MODE_BLEND"
                 elif from_node.bl_idname == "ShaderNodeMath" and from_node.operation == "GREATER_THAN":
-                    alpha_mode = 2 # MASK
+                    alpha_mode = "PRIM_ALPHA_MODE_MASK"
                     alpha_cutoff = from_node.inputs[1].default_value
             else:
-                alpha = bsdf_node.inputs["Alpha"].default_value
-            params.append(f"PRIM_ALPHA_MODE, {i}, {alpha_mode}, {round(alpha_cutoff * 255)}")
+                alpha = principled.inputs["Alpha"].default_value
+            params.append(f"\n{parindent}PRIM_ALPHA_MODE, {i}, {alpha_mode}, {round(alpha_cutoff * 255)}")
 
             # base color
-            base_color_input = bsdf_node.inputs["Base Color"]
+            base_color_input = principled.inputs["Base Color"]
             if base_color_input.links:
                 from_node = base_color_input.links[0].from_node
                 if from_node.bl_idname == "ShaderNodeMix":
@@ -146,26 +167,28 @@ def create_lsl_script():
                     if from_node_input.links:
                         from_node = from_node_input.links[0].from_node
                 if from_node.bl_idname == "ShaderNodeTexImage":
+                    texture_os, texture_ot, texture_ss, texture_st, texture_rot = _get_trans(from_node)
+
                     image = from_node.image
                     if "sl_uuid" in image:
                         face_tree["Base Color Texture"] = image["sl_uuid"]
                         # blinn Phong
                         # [ string texture, vector repeats, vector offsets, float rotation_in_radians ]
-                        params.append(f"PRIM_TEXTURE, {i}, \"{lsl_escape(image["sl_uuid"])}\", <1.0, 1.0, 0.0>, ZERO_VECTOR, 0.0")
+                        params.append(f"\n{parindent}PRIM_TEXTURE, {i}, \"{lsl_escape(image["sl_uuid"])}\", <{texture_ss}, {texture_st}, 1.0>, <{texture_os}, {texture_ot}, 0.0>, {texture_rot}")
                         # pbr if overridden
                         if "pbrMetallicRoughness" in pbr_overrides:
                             # [ string texture, vector repeats, vector offsets, float rotation_in_radians, vector color, float alpha, integer gltf_alpha_mode, float alpha_mask_cutoff, integer double_sided ]
-                            params.append(f"PRIM_GLTF_BASE_COLOR, {i}, \"{lsl_escape(image["sl_uuid"])}\", \"\", \"\", \"\", {tint_color}, {alpha:.2f}, {alpha_mode}, {alpha_cutoff:.2f}, \"\"")
+                            params.append(f"\n{parindent}PRIM_GLTF_BASE_COLOR, {i}, \"{lsl_escape(image["sl_uuid"])}\", <{texture_ss}, {texture_st}, 1.0>, <{texture_os}, {texture_ot}, 0.0>, {texture_rot}, {tint_color}, {alpha:.2f}, {alpha_mode}, {alpha_cutoff:.2f}, EMPTY_STRING")
             else:
-                tint_color = bsdf_node.inputs["Base Color"].default_value
+                tint_color = principled.inputs["Base Color"].default_value
                 tint_color = f"<{tint_color[0]:.2f}, {tint_color[1]:.2f}, {tint_color[2]:.2f}>"
                 if "pbrMetallicRoughness" in pbr_overrides:
-                    params.append(f"PRIM_GLTF_BASE_COLOR, {i}, \"\", \"\", \"\", \"\", {tint_color}, {alpha:.2f}, {alpha_mode}, {alpha_cutoff:.2f}, \"\"")
+                    params.append(f"\n{parindent}PRIM_GLTF_BASE_COLOR, {i}, \"\", \"\", \"\", \"\", {tint_color}, {alpha:.2f}, {alpha_mode}, {alpha_cutoff:.2f}, EMPTY_STRING")
 
-            params.append(f"PRIM_COLOR, {i}, {tint_color}, {alpha:.2f}")
+            params.append(f"\n{parindent}PRIM_COLOR, {i}, {tint_color}, {alpha:.2f}")
 
             # normal map
-            normal_input = bsdf_node.inputs["Normal"]
+            normal_input = principled.inputs["Normal"]
             if normal_input.links:
                 normal_input_node = normal_input.links[0].from_node
                 if normal_input_node.bl_idname == "ShaderNodeNormalMap":
@@ -173,46 +196,64 @@ def create_lsl_script():
                     if normal_color_input and normal_color_input.links:
                         from_node = normal_color_input.links[0].from_node
                         if from_node.bl_idname == "ShaderNodeTexImage":
+                            texture_os, texture_ot, texture_ss, texture_st, texture_rot = _get_trans(from_node)
+
                             image = from_node.image
                             if "sl_uuid" in image:
                                 face_tree["Normal Map Texture"] = image["sl_uuid"]
                                 # blinn Phong
                                 # [ string texture, vector repeats, vector offsets, float rotation_in_radians ]
-                                params.append(f"PRIM_NORMAL, {i}, \"{lsl_escape(image["sl_uuid"])}\", <1.0, 1.0, 0.0>, ZERO_VECTOR, 0.0")
+                                params.append(f"\n{parindent}PRIM_NORMAL, {i}, \"{lsl_escape(image["sl_uuid"])}\", <{texture_ss}, {texture_st}, 1.0>, <{texture_os}, {texture_ot}, 0.0>, {texture_rot}")
                                 # pbr if overridden
                                 if "normalTexture" in pbr_overrides:
                                     #  string texture, vector repeats, vector offsets, float rotation_in_radians ]
-                                    params.append(f"PRIM_GLTF_NORMAL, {i}, \"{lsl_escape(image["sl_uuid"])}\", \"\", \"\", \"\"")
+                                    params.append(f"\n{parindent}PRIM_GLTF_NORMAL, {i}, \"{lsl_escape(image["sl_uuid"])}\", <{texture_ss}, {texture_st}, 1.0>, <{texture_os}, {texture_ot}, 0.0>, {texture_rot}")
 
             # specular map  (blinn phong only, notice by invert color node)
-            roughness_input = bsdf_node.inputs["Roughness"]
+            roughness_input = principled.inputs["Roughness"]
             if roughness_input.links:
                 invert_input = roughness_input.links[0].from_node
+
+                spec_color = "<1.0, 1.0, 1.0>"
+                spec_glossiness = 51
+                spec_environment = 0
+                if "sl_specular_props" in material:
+                    specular_props = json.loads(material["sl_specular_props"])
+                    spec_color = specular_props["color"]
+                    spec_glossiness = specular_props["glossiness"]
+                    spec_environment = specular_props["environment"]
+                    spec_color = f"<{spec_color[0]:.3f}, {spec_color[1]:.3f}, {spec_color[2]:.3f}>"
+
                 if invert_input.bl_idname == "ShaderNodeInvert":
                     specular_color_input = invert_input.inputs.get("Color")
                     if specular_color_input and specular_color_input.links:
                         from_node = specular_color_input.links[0].from_node
                         if from_node.bl_idname == "ShaderNodeTexImage":
+                            texture_os, texture_ot, texture_ss, texture_st, texture_rot = _get_trans(from_node)
+
                             image = from_node.image
                             if "sl_uuid" in image:
                                 face_tree["Specular Map Texture"] = image["sl_uuid"]
                                 # blinn phong
                                 # [ string texture, vector repeats, vector offsets, float rotation_in_radians, vector color, integer glossiness integer environment ]
-                                params.append(f"PRIM_SPECULAR, {i}, \"{lsl_escape(image["sl_uuid"])}\", <1.0, 1.0, 0.0>, ZERO_VECTOR, 0.0, <1.0, 1.0, 1.0>, 255, 0")
+                                params.append(f"\n{parindent}PRIM_SPECULAR, {i}, \"{lsl_escape(image["sl_uuid"])}\", <{texture_ss}, {texture_st}, 1.0>, <{texture_os}, {texture_ot}, 0.0>, {texture_rot}, {spec_color}, {spec_glossiness}, {spec_environment}")
                 else:
                     # if roughness is set by pbr material, the blinn phong
                     # specular map may exist as node but not be connected
                     for node in nodes:
                         if node.label == "Specular Map Image":
-                            image = from_node.image
+                            texture_os, texture_ot, texture_ss, texture_st, texture_rot = _get_trans(node)
+
+                            image = node.image
                             if "sl_uuid" in image:
                                 face_tree["Specular Map Texture"] = image["sl_uuid"]
-                                params.append(f"PRIM_SPECULAR, {i}, \"{lsl_escape(image["sl_uuid"])}\", <1.0, 1.0, 0.0>, ZERO_VECTOR, 0.0, <1.0, 1.0, 1.0>, 255, 0")
+                                params.append(f"\n{parindent}PRIM_SPECULAR, {i}, \"{lsl_escape(image["sl_uuid"])}\", <{texture_ss}, {texture_st}, 1.0>, <{texture_os}, {texture_ot}, 0.0>, {texture_rot}, {spec_color}, {spec_glossiness}, {spec_environment}")
+                            break
 
             # orm map (pbr only)
-            orm_texture = ""
-            if "occlusionTexture" in pbr_overrides:
-                orm_input = bsdf_node.inputs["Metallic"]
+            orm_texture_node = None
+            if "occlusionTexture" in pbr_overrides or "occlusionTextureTransform" in pbr_overrides:
+                orm_input = principled.inputs["Metallic"]
                 if orm_input.links:
                     split_input = orm_input.links[0].from_node
                     if split_input.bl_idname == "ShaderNodeSeparateColor":
@@ -223,31 +264,57 @@ def create_lsl_script():
                                 image = from_node.image
                                 if "sl_uuid" in image:
                                     face_tree["ORM Map Texture"] = image["sl_uuid"]
-                                    orm_texture = lsl_escape(image["sl_uuid"])
+                                    orm_texture_node = from_node
             metallic_factor = "\"\""
             roughness_factor = "\"\""
             if "pbrMetallicRoughness" in pbr_overrides:
-                metallic_factor = f"{bsdf_node.inputs["Metallic"].default_value:.2f}"
-                roughness_factor = f"{bsdf_node.inputs["Roughness"].default_value:.2f}"
-            if orm_texture or metallic_factor != "\"\"" or roughness_factor != "\"\"":
+                metallic_factor = f"{principled.inputs["Metallic"].default_value:.2f}"
+                roughness_factor = f"{principled.inputs["Roughness"].default_value:.2f}"
+            if orm_texture_node is not None or metallic_factor != "\"\"" or roughness_factor != "\"\"":
+                orm_texture = "\"\""
+                texture_os = "\"\""
+                texture_ot = "\"\""
+                texture_ss = "\"\""
+                texture_st = "\"\""
+                texture_rot = "\"\""
+                if orm_texture_node:
+                    orm_texture = f"\"{lsl_escape(orm_texture_node.image["sl_uuid"])}\""
+                    texture_os, texture_ot, texture_ss, texture_st, texture_rot = _get_trans(orm_texture_node)
                 # pbr
                 # [ string texture, vector repeats, vector offsets, float rotation_in_radians, float metallic_factor, float roughness_factor ]
-                params.append(f"PRIM_GLTF_METALLIC_ROUGHNESS, {i}, \"{orm_texture}\", \"\", \"\", \"\", {metallic_factor}, {roughness_factor}")
+                params.append(f"\n{parindent}PRIM_GLTF_METALLIC_ROUGHNESS, {i}, {orm_texture}, <{texture_ss}, {texture_st}, 1.0>, <{texture_os}, {texture_ot}, 0.0>, {texture_rot}, {metallic_factor}, {roughness_factor}")
 
             # emissive map (pbr only)
-            if "emissiveTexture" in pbr_overrides:
-                emission_input = bsdf_node.inputs.get("Emission")
+            emissive_texture_node = None
+            if "emissiveTexture" in pbr_overrides or "emissiveTextureTransform" in pbr_overrides:
+                emission_input = principled.inputs.get("Emission")
                 if emission_input and emission_input.links:
                     from_node = emission_input.links[0].from_node
                     if from_node.bl_idname == "ShaderNodeTexImage":
                         image = from_node.image
                         if "sl_uuid" in image:
+                            emissive_texture_node = from_node
                             face_tree["Emission Map Texture"] = image["sl_uuid"]
-                            # pbr
-                            #  [ string texture, vector repeats, vector offsets, float rotation_in_radians, vector emissive_tint ]
-                            params.append(f"PRIM_GLTF_EMISSIVE, {i}, \"{lsl_escape(image["sl_uuid"])}\", \"\", \"\", \"\", \"\"")
+            emission_factor = "\"\""
+            if "emissiveFactor" in pbr_overrides:
+                emission_factor = principled.inputs["Emission Color"].default_value
+                emission_factor = f"<{emission_factor[0]:.2f}, {emission_factor[1]:.2f}, {emission_factor[2]:.2f}>"
+            if emissive_texture_node is not None or emission_factor != "\"\"":
+                emission_texture = "\"\""
+                texture_os = "\"\""
+                texture_ot = "\"\""
+                texture_ss = "\"\""
+                texture_st = "\"\""
+                texture_rot = "\"\""
+                if emissive_texture_node:
+                    emission_texture = f"\"{lsl_escape(emissive_texture_node.image["sl_uuid"])}\""
+                    texture_os, texture_ot, texture_ss, texture_st, texture_rot = _get_trans(emissive_texture_node)
+                # pbr
+                #  [ string texture, vector repeats, vector offsets, float rotation_in_radians, vector emissive_tint ]
+                params.append(f"\n{parindent}PRIM_GLTF_EMISSIVE, {i}, {emission_texture}, <{texture_ss}, {texture_st}, 1.0>, <{texture_os}, {texture_ot}, 0.0>, {texture_rot}, {emission_factor}")
+                
 
-        lsl_text += f"{subindent}llSetLinkPrimitiveParamsFast(link_num, [{", ".join(params)}]);\n{indent}}}"
+        lsl_text += f"{subindent}llSetLinkPrimitiveParamsFast(link_num, [{",".join(params)}\n{subindent}]);\n{indent}}}"
 
     lsl_text += """
             else
