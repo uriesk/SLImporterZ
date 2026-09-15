@@ -336,7 +336,7 @@ def import_lod_mesh(lod_data, name, **kwargs):
             obj.location = (prim_position[0], prim_position[1], prim_position[2])
         if prim_rotation:
             obj.rotation_mode = 'QUATERNION'
-            obj.rotation_quaternion = Rz90.to_quaternion() @ Quaternion((prim_rotation[3], prim_rotation[0], prim_rotation[1], prim_rotation[2]))
+            obj.rotation_quaternion = Quaternion((prim_rotation[3], prim_rotation[0], prim_rotation[1], prim_rotation[2]))
 
     return obj
 
