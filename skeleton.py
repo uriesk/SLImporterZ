@@ -24,7 +24,7 @@ from mathutils import Vector, Matrix, Euler
 import json
 
 
-def get_skeleton():
+def get_skeleton(use_pivot=False):
     tree = ET.parse(os.path.join(os.path.dirname(os.path.realpath(__file__)), "assets", "avatar_skeleton.xml"))
     root = tree.getroot()
 
@@ -42,22 +42,33 @@ def get_skeleton():
             "type": bone.tag
         }
 
-        if parent:
-            offset = result[parent]["pos"]
-            entry["pos"] = [entry["pos_orig"][i]+offset[i] for i in range(0,3)]
-            #entry["rot"] = result[parent]["rot"] @ Euler(entry["rot_orig"], "XYZ").to_matrix().to_4x4()
+        if "pivot" in bone.attrib:
+            entry["pivot_orig"] = [float(i) for i in bone.attrib["pivot"].split(" ")]
+        else:
+            entry["pivot_orig"] = entry["pos_orig"]
+
+        if use_pivot:
+            entry["pos"] = entry["pivot_orig"]
         else:
             entry["pos"] = entry["pos_orig"]
+        if parent:
+            offset = result[parent]["pos"]
+            entry["pos"] = [entry["pos"][i]+offset[i] for i in range(0,3)]
+
+        entry["rot"] = Euler(
+            (math.radians(entry["rot_orig"][0]),
+            math.radians(entry["rot_orig"][1]),
+            math.radians(entry["rot_orig"][2])),
+            "XYZ"
+        ).to_matrix().to_4x4()
+
         entry["end"] = [entry["end_orig"][i]+entry["pos"][i] for i in range(0,3)]
-        # TODO: i don't know what to do with rot yet, or whether or not its
-        # relative or per parent like pos
-        entry["rot"] = Euler(entry["rot_orig"], "XYZ").to_matrix().to_4x4()
 
         sx, sy, sz = entry["scale_orig"]
         entry["scale"] = Matrix.Diagonal((sx, sy, sz, 1.0))
 
         result[name] = entry
-        
+
         for child in bone:
             getRecursive(child, parent=name)
         return result
@@ -76,6 +87,8 @@ def add_skeleton(context):
     pose = armature_obj.pose
     boners = {}
     for bone_name, bone in bones.items():
+        if bone["group"] in ["Limb", "Tail", "Wing", "Nose", "Lips", "Mouth"]:
+            continue
         b = edit_bones.new(bone_name)
         boners[bone_name] = b
         b.head = bone["pos"]
@@ -89,29 +102,30 @@ def add_skeleton(context):
     # Remove auto-created bone
     bpy.ops.object.mode_set(mode='EDIT', toggle=True)
 
-    # Create bone collections
-    bone_collection = armature.collections.new(name="bone")
-    collision_collection = armature.collections.new(name="collision_volume")
-
-    # Assign bones to collections based on type
+    # Assign bone collections
     for bone_name, bone in bones.items():
-        if bone["type"] == "collision_volume":
-            armature.collections["collision_volume"].assign(pose.bones[bone_name])
-        else:
-            armature.collections["bone"].assign(pose.bones[bone_name])
+        if bone["group"] in ["Limb", "Tail", "Wing", "Nose", "Lips", "Mouth"]:
+            continue
+        collection = armature.collections.get(bone["group"])
+        if collection is None:
+            collection = armature.collections.new(name=bone["group"])
+        collection.assign(pose.bones[bone_name])
 
     # inverse_bind_matrix from SL data includes absolute translation, but
     # already transformed relative rotation and scale.
-    # bind_matrix_transform can be used to add it.
-    # TODO what do roation from avatar_skeleton.xml?
+    # bind_matrix_transform can be used to add it
     json_data = {}
     for bone_name in boners.keys():
         boner_matrix = armature.bones[bone_name].matrix_local
 
+        rot = bones[bone_name]["rot"].to_euler('XYZ')
+        if rot.x != 0.0 or rot.y != 0.0 or rot.z != 0.0:
+            print(bone_name, [math.degrees(a) for a in rot])
+
         # rotation from bones created in blender
         boner_rotation_matrix = boner_matrix.to_quaternion().to_matrix().to_4x4()
         # inverted scale from avatar_skeleton.xml
-        bind_matrix_transform = bones[bone_name]["scale"].inverted() @ boner_rotation_matrix
+        bind_matrix_transform = bones[bone_name]["scale"].inverted() @ bones[bone_name]["rot"].inverted() @ boner_rotation_matrix
 
         json_data[bone_name] = [list(row) for row in bind_matrix_transform]
     json_path = os.path.join(os.path.dirname(os.path.realpath(__file__)), "assets", "bind_matrix_transform.json")
