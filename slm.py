@@ -244,6 +244,7 @@ def import_lod_mesh(lod_data, name, **kwargs):
             denormalization_matrix = Matrix.Diagonal((scale_x, scale_y, scale_z, 1.0))
         else:
             continue
+        normal_denormalization_matrix = denormalization_matrix.to_3x3().inverted().transposed()
 
         # Get weights as well with vertices
         weight_data = face.get("Weights", b'')
@@ -275,6 +276,7 @@ def import_lod_mesh(lod_data, name, **kwargs):
                 weight_offset += 2
 
             vertice_transformation_matrix = denormalization_matrix
+            normal_transformation_matrix = normal_denormalization_matrix
 
             # move into rest pose
             if bones and len(vertex_influences):
@@ -298,11 +300,10 @@ def import_lod_mesh(lod_data, name, **kwargs):
                     joint_matrix =  bone_matrix @ inverse_bind_matrix
                     skin_mat += joint_matrix * weight_float
                 vertice_transformation_matrix = skin_mat @ denormalization_matrix
+                normal_transformation_matrix = vertice_transformation_matrix.to_3x3().inverted().transposed()
 
             pos = affine_transform(vertice_transformation_matrix, pos)
-
-            normal_skin_mat = vertice_transformation_matrix.to_3x3().inverted().transposed()
-            normals[u] = (normal_skin_mat @ normals[u]).normalized()
+            normals[u] = (normal_transformation_matrix @ normals[u]).normalized()
 
             vertice.co = pos
             u += 1
