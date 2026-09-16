@@ -308,11 +308,11 @@ def import_lod_mesh(lod_data, name, **kwargs):
             vertice.co = pos
             u += 1
 
+    mesh.update()
+    mesh.validate(clean_customdata=False)
     mesh.normals_split_custom_set_from_vertices(normals)
     del normals
 
-    mesh.update()
-    mesh.validate(clean_customdata=False)
     obj = bpy.data.objects.new(mesh.name, mesh)
 
     # assign weights
@@ -481,17 +481,15 @@ def import_slm(stream, name, **kwargs):
             # will contain translational information that will override the
             # default Second Life skeleton. Rotational and scaling components
             # are at this moment, unused.
-            print("has alt_inverse_bind_matrix")
+            print("Model has alt_inverse_bind_matrix")
             for i, joint_name in enumerate(joint_names):
-                print("")
                 print(joint_name)
                 print(matrix_from_array(skin_data["alt_inverse_bind_matrix"][i]))
                 print(matrix_from_array(skin_data["inverse_bind_matrix"][i]))
         if "pelvis_offset" in skin_data:
             # optional, used to provide a pelvis fixup for avatar rigs that
             # alter the default Second Life skeleton
-            print("pelvis_offset")
-            print(str(skin_data["pelvis_offset"]))
+            print("pelvis_offset" + str(skin_data["pelvis_offset"]))
 
     for lod_name, type_name in (("high_lod", None), ("medium_lod", "LOD2"), ("low_lod", "LOD1"), ("lowest_lod", "LOD0")):
 
