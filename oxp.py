@@ -878,8 +878,6 @@ class SLIZ_IMPORT_oxp(bpy.types.Operator, ImportHelper):
         try:
             amount_imported_meshes, amount_meshes = oxp_parser.parse_from_file(self.filepath)
         except Exception as e:
-            # TODO: only for debugging
-            raise e
             self._notify({'ERROR'}, str(e))
             return {'CANCELLED'}
 

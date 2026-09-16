@@ -42,8 +42,7 @@ def affine_transform(matrix, v):
     return Vector((
         v.x * col0.x + v.y * col1.x + v.z * col2.x + trans.x,
         v.x * col0.y + v.y * col1.y + v.z * col2.y + trans.y,
-        v.x * col0.z + v.y * col1.z + v.z * col2.z + trans.z,
-        1
+        v.x * col0.z + v.y * col1.z + v.z * col2.z + trans.z
     ))
 
 Rz90 = Matrix((
@@ -100,10 +99,6 @@ def import_lod_mesh(lod_data, name, **kwargs):
 
     vertices = []
     triangles = []
-    weights_per_joint = []
-
-    if bones:
-        weights_per_joint = [[] for _ in range(len(bones))]
 
     # Create Mesh out of Vertices and Triangles
     for face in lod_data:
@@ -119,14 +114,6 @@ def import_lod_mesh(lod_data, name, **kwargs):
             domain_max = [0.5, 0.5, 0.5]
             domain_min = [-0.5, -0.5, -0.5]
 
-        scale_x, scale_y, scale_z = face.get("NormalizedScale", [1.0, 1.0, 1.0])
-        scale_matrix = Matrix.Diagonal((scale_x, scale_y, scale_z, 1.0))
-
-        # Get weights as well with vertices
-        weight_data = face.get("Weights", b'')
-        weight_offset = 0 # offset within weights data
-        weight_length = len(weight_data)
-
         # Get vertices
         vertices_offset = len(vertices) # total vertices offset of face
         data = face.get("Position", b'')
@@ -141,57 +128,8 @@ def import_lod_mesh(lod_data, name, **kwargs):
             x_float = domain_min[0] + (x / 65535.0) * (domain_max[0] - domain_min[0])
             y_float = domain_min[1] + (y / 65535.0) * (domain_max[1] - domain_min[1])
             z_float = domain_min[2] + (z / 65535.0) * (domain_max[2] - domain_min[2])
-            pos = Vector((x_float, y_float, z_float, 1.0))
-
-            vertex_influences = []
-            vertex_weights = []
-            while len(vertex_influences) < 4 and weight_offset < weight_length:
-                joint_idx = weight_data[weight_offset]
-                weight_offset += 1
-                if joint_idx == 0xFF:
-                    break
-
-                weight_val = struct.unpack('<H', weight_data[weight_offset:weight_offset+2])[0]
-
-                weight_float = weight_val / 65535.0
-                # for skinning into rest pose
-                vertex_influences.append(joint_idx)
-                vertex_weights.append(weight_float)
-                # for applying weights
-                weights_per_joint[joint_idx].append((vertices_offset + i, weight_float))
-
-                weight_offset += 2
-
-            if bind_shape_matrix:
-                pos = affine_transform(bind_shape_matrix, pos)
-            else:
-                pos = affine_transform(scale_matrix, pos)
-
-            # move into rest pose
-            if bones and len(vertex_influences):
-                skin_mat = Matrix([
-                    [0.0, 0.0, 0.0, 0.0],
-                    [0.0, 0.0, 0.0, 0.0],
-                    [0.0, 0.0, 0.0, 0.0],
-                    [0.0, 0.0, 0.0, 0.0]
-                ])
-                # normalizing weights is mostly unneccessary, meshes should never
-                # need this, but firestorm is doing it as well, so we fellow,
-                # just in case that there are broken meshes that indeed need it
-                weight_scale = sum(vertex_weights)
-
-                # a skinning shader
-                for i, joint_idx in enumerate(vertex_influences):
-                    weight_float = vertex_weights[i] / weight_scale
-
-                    inverse_bind_matrix = inverse_bind_matrices[joint_idx]
-                    bone_matrix = bones[joint_idx].matrix_local
-                    joint_matrix =  bone_matrix @ inverse_bind_matrix
-                    skin_mat += joint_matrix * weight_float
-
-                pos = affine_transform(skin_mat, pos)
-
-            vertices.append(pos.xyz)
+            pos = Vector((x_float, y_float, z_float))
+            vertices.append(pos)
 
         # set SLIZ_UV_domain and SLIZ_UV_offset if uv seems legit
         if "TexCoord0" in face and "TexCoord0Domain" in face and len(face["TexCoord0"]) == num_vertices * 4:
@@ -286,9 +224,94 @@ def import_lod_mesh(lod_data, name, **kwargs):
         else:
             for u in range(num_vertices):
                 normals.append(Vector((0, 0, 0)))
+
+    # transform vertices to final position, get and apply weights if neccessary
+    weights_per_joint = []
+    if joint_names:
+        weights_per_joint = [[] for _ in range(len(joint_names))]
+
+    for i, face in enumerate(lod_data):
+        vertices_offset = 0
+        if i > 0:
+            vertices_offset = face_vertices_offsets[i -1]
+        next_vertices_offset = face_vertices_offsets[i]
+
+        denormalization_matrix = Matrix()
+        if bind_shape_matrix:
+            denormalization_matrix = bind_shape_matrix
+        elif "NormalizedScale" in face:
+            scale_x, scale_y, scale_z = face["NormalizedScale"]
+            denormalization_matrix = Matrix.Diagonal((scale_x, scale_y, scale_z, 1.0))
+        else:
+            continue
+
+        # Get weights as well with vertices
+        weight_data = face.get("Weights", b'')
+        weight_offset = 0
+        weight_length = len(weight_data)
+
+        u = vertices_offset
+        while u < next_vertices_offset:
+            vertice = mesh.vertices[u]
+            pos = vertice.co
+
+            vertex_influences = []
+            vertex_weights = []
+            while len(vertex_influences) < 4 and weight_offset < weight_length:
+                joint_idx = weight_data[weight_offset]
+                weight_offset += 1
+                if joint_idx == 0xFF:
+                    break
+
+                weight_val = struct.unpack('<H', weight_data[weight_offset:weight_offset+2])[0]
+
+                weight_float = weight_val / 65535.0
+                # for skinning into rest pose
+                vertex_influences.append(joint_idx)
+                vertex_weights.append(weight_float)
+                # for applying weights
+                weights_per_joint[joint_idx].append((u, weight_float))
+
+                weight_offset += 2
+
+            vertice_transformation_matrix = denormalization_matrix
+
+            # move into rest pose
+            if bones and len(vertex_influences):
+                skin_mat = Matrix([
+                    [0.0, 0.0, 0.0, 0.0],
+                    [0.0, 0.0, 0.0, 0.0],
+                    [0.0, 0.0, 0.0, 0.0],
+                    [0.0, 0.0, 0.0, 0.0]
+                ])
+                # normalizing weights is mostly unneccessary, meshes should never
+                # need this, but firestorm is doing it as well, so we follow,
+                # just in case that there are broken meshes that indeed need it
+                weight_scale = sum(vertex_weights)
+
+                # a skinning shader
+                for w, joint_idx in enumerate(vertex_influences):
+                    weight_float = vertex_weights[w] / weight_scale
+
+                    inverse_bind_matrix = inverse_bind_matrices[joint_idx]
+                    bone_matrix = bones[joint_idx].matrix_local
+                    joint_matrix =  bone_matrix @ inverse_bind_matrix
+                    skin_mat += joint_matrix * weight_float
+                vertice_transformation_matrix = skin_mat @ denormalization_matrix
+
+            pos = affine_transform(vertice_transformation_matrix, pos)
+
+            normal_skin_mat = vertice_transformation_matrix.to_3x3().inverted().transposed()
+            normals[u] = (normal_skin_mat @ normals[u]).normalized()
+
+            vertice.co = pos
+            u += 1
+
     mesh.normals_split_custom_set_from_vertices(normals)
     del normals
 
+    mesh.update()
+    mesh.validate(clean_customdata=False)
     obj = bpy.data.objects.new(mesh.name, mesh)
 
     # assign weights
@@ -317,8 +340,6 @@ def import_lod_mesh(lod_data, name, **kwargs):
                 current_threshold = face_tirangle_offsets[current_face]
             poly.material_index = current_face
 
-    mesh.update()
-    mesh.validate(clean_customdata=False)
     obj.location = (0, 0, 0)
     # assign to collection
     if collection is not None:
