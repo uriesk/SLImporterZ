@@ -33,6 +33,51 @@ from bpy_extras.io_utils import ImportHelper
 from mathutils import Quaternion, Vector, Matrix
 
 
+def set_pose_matrices(obj, matrix_map):
+
+    def rec(pbone, parent_matrix):
+        if pbone.name in matrix_map:
+            matrix = matrix_map[pbone.name]
+            # # Instead of:
+            # pbone.matrix = matrix
+            # bpy.context.view_layer.update()
+
+            # Compute and assign local matrix, using the new parent matrix
+            if pbone.parent:
+                pbone.matrix_basis = pbone.bone.convert_local_to_pose(
+                    matrix,
+                    pbone.bone.matrix_local,
+                    parent_matrix=parent_matrix,
+                    parent_matrix_local=pbone.parent.bone.matrix_local,
+                    invert=True
+                )
+            else:
+                pbone.matrix_basis = pbone.bone.convert_local_to_pose(
+                    matrix,
+                    pbone.bone.matrix_local,
+                    invert=True
+                )
+        else:
+            # Compute the updated pose matrix from local and new parent matrix
+            if pbone.parent:
+                matrix = pbone.bone.convert_local_to_pose(
+                    pbone.matrix_basis,
+                    pbone.bone.matrix_local,
+                    parent_matrix=parent_matrix,
+                    parent_matrix_local=pbone.parent.bone.matrix_local,
+                )
+            else:
+                matrix = pbone.bone.convert_local_to_pose(
+                    pbone.matrix_basis,
+                    pbone.bone.matrix_local,
+                )
+
+        for child in pbone.children:
+            rec(child, matrix)
+    for pbone in obj.pose.bones:
+        if not pbone.parent:
+            rec(pbone, None)
+
 def affine_transform(matrix, v):
     col0 = matrix.col[0].xyz
     col1 = matrix.col[1].xyz
@@ -80,6 +125,7 @@ def import_lod_mesh(lod_data, name, **kwargs):
     bind_shape_matrix = kwargs.get("bind_shape_matrix")
     joint_names = kwargs.get("joint_names")
     inverse_bind_matrices = kwargs.get("inverse_bind_matrices")
+    skin_to_armature = kwargs.get("skin_to_armature", False)
     bones = kwargs.get("bones")
     armature=kwargs.get("armature")
     # lod_data:
@@ -279,7 +325,7 @@ def import_lod_mesh(lod_data, name, **kwargs):
             normal_transformation_matrix = normal_denormalization_matrix
 
             # move into rest pose
-            if bones and len(vertex_influences):
+            if skin_to_armature and bones and len(vertex_influences):
                 skin_mat = Matrix([
                     [0.0, 0.0, 0.0, 0.0],
                     [0.0, 0.0, 0.0, 0.0],
@@ -426,6 +472,7 @@ def import_slm(stream, name, **kwargs):
     bind_shape_matrix = None
     joint_names = None
     bones = None
+    old_bone_matrices = {}
     if "skin" in slm_metadata:
         skin_offset = start_pos + header_size + slm_metadata["skin"]["offset"]
         skin_size = slm_metadata["skin"]["size"]
@@ -457,12 +504,23 @@ def import_slm(stream, name, **kwargs):
 
             bones = []
             for i, joint_name in enumerate(joint_names):
-                bones.append(armature.data.bones[joint_name])
+                print("bone " + joint_name)
+                bone = armature.data.bones[joint_name]
+                bone.use_deform = True
+                bones.append(bone)
         if "inverse_bind_matrix" in skin_data:
             # corret inverse bind matrices according to standard skeleton
             bind_matrix_transforms = skeleton.get_bind_matrix_transform()
 
             inverse_bind_matrices = []
+
+            # TODO move bones to target
+
+            for pb in armature.pose.bones:
+                print(pb.name, pb.matrix)
+
+            #bpy.ops.object.mode_set(mode='EDIT')
+
             for i, inverse_bind_matrix in enumerate(skin_data["inverse_bind_matrix"]):
                 inverse_bind_matrix = matrix_from_array(inverse_bind_matrix)
 
@@ -474,8 +532,23 @@ def import_slm(stream, name, **kwargs):
 
                 bind_matrix = bind_matrix @ bind_matrix_transform
 
+                print("edit bone " + joint_names[i])
+                #armature_bone = armature.data.edit_bones[joint_names[i]]
+
+                #sx, sy, sz = bind_matrix.to_scale()
+                #scale_matrix = Matrix.Diagonal((sx, sy, sz, 1.0))
+                #old_bone_matrices[joint_names[i]] = armature_bone.matrix.copy() @ scale_matrix.inverted()
+
+                # TODO try this again
+                #armature_bone.matrix = bind_matrix
+                print("scale change " + joint_names[i], bind_matrix.to_scale())
+
                 inverse_bind_matrix = bind_matrix.inverted()
                 inverse_bind_matrices.append(inverse_bind_matrix)
+
+            #bpy.ops.object.mode_set(mode='OBJECT')
+
+
         if "alt_inverse_bind_matrix" in skin_data:
             # optional, if joint offsets are used then the alternate bind matrix
             # will contain translational information that will override the
@@ -537,7 +610,8 @@ def import_slm(stream, name, **kwargs):
                 bind_shape_matrix=bind_shape_matrix,
                 inverse_bind_matrices=inverse_bind_matrices,
                 armature=armature,
-                bones=bones
+                bones=bones,
+                skin_to_armature=True,
             )
             if mesh_object is not None:
                 imported_mesh_objects.append(mesh_object)
@@ -548,6 +622,43 @@ def import_slm(stream, name, **kwargs):
                     mod = mesh_object.modifiers.new(name="Armature", type='ARMATURE')
                     mod.object = armature
                     mod.use_vertex_groups = True
+
+    # TODO move armature back
+
+    if imported_mesh_objects and False:
+        bpy.ops.object.mode_set(mode='OBJECT')
+        bpy.context.view_layer.update()
+
+        # set pose
+        bpy.context.view_layer.objects.active = armature
+        bpy.ops.object.mode_set(mode='POSE')
+
+        set_pose_matrices(armature, old_bone_matrices)
+
+        bpy.context.view_layer.update()
+        bpy.ops.object.mode_set(mode='OBJECT')
+
+        # apply armature modifier
+        for mesh_object in imported_mesh_objects:
+            bpy.context.view_layer.objects.active = mesh_object
+            mesh_object.select_set(True)
+
+            for mod in list(mesh_object.modifiers):
+                if mod.type == 'ARMATURE':
+                    bpy.ops.object.modifier_apply(modifier=mod.name)
+
+        # set bind pose to rest pose
+        bpy.context.view_layer.objects.active = armature
+        bpy.ops.object.mode_set(mode='POSE')
+        bpy.ops.pose.armature_apply()
+        bpy.ops.object.mode_set(mode='OBJECT')
+
+        # add new armature modifiers
+        for mesh_object in imported_mesh_objects:
+            mod = mesh_object.modifiers.new(name="Armature", type='ARMATURE')
+            mod.object = armature
+            mod.use_vertex_groups = True
+
     return imported_mesh_objects
 
 class SLIZ_IMPORT_slm(bpy.types.Operator, ImportHelper):
