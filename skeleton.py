@@ -87,8 +87,6 @@ def add_skeleton(context):
     pose = armature_obj.pose
     boners = {}
     for bone_name, bone in bones.items():
-        #if bone["group"] in ["Limb", "Tail", "Wing", "Nose", "Lips", "Mouth"]:
-        #    continue
         b = edit_bones.new(bone_name)
         boners[bone_name] = b
         b.head = bone["pos"]
@@ -108,8 +106,6 @@ def add_skeleton(context):
 
     # Assign bone collections
     for bone_name, bone in bones.items():
-        #if bone["group"] in ["Limb", "Tail", "Wing", "Nose", "Lips", "Mouth"]:
-        #    continue
         collection = armature.collections.get(bone["group"])
         if collection is None:
             collection = armature.collections.new(name=bone["group"])
@@ -140,6 +136,82 @@ def add_skeleton(context):
 
     armature_obj.location = (0,0,0)
     return armature_obj
+
+
+def set_pose_matrices(armature, mesh_objects, matrix_map):
+    bpy.ops.object.mode_set(mode='OBJECT')
+    bpy.context.view_layer.update()
+    bpy.context.view_layer.objects.active = armature
+    bpy.ops.object.mode_set(mode='POSE')
+
+    # set pose to matrix_map
+    def rec(pbone, parent_matrix):
+        if pbone.name in matrix_map:
+            matrix = matrix_map[pbone.name]
+            # # Instead of:
+            # pbone.matrix = matrix
+            # bpy.context.view_layer.update()
+
+            # Compute and assign local matrix, using the new parent matrix
+            if pbone.parent:
+                pbone.matrix_basis = pbone.bone.convert_local_to_pose(
+                    matrix,
+                    pbone.bone.matrix_local,
+                    parent_matrix=parent_matrix,
+                    parent_matrix_local=pbone.parent.bone.matrix_local,
+                    invert=True
+                )
+            else:
+                pbone.matrix_basis = pbone.bone.convert_local_to_pose(
+                    matrix,
+                    pbone.bone.matrix_local,
+                    invert=True
+                )
+        else:
+            # Compute the updated pose matrix from local and new parent matrix
+            if pbone.parent:
+                matrix = pbone.bone.convert_local_to_pose(
+                    pbone.matrix_basis,
+                    pbone.bone.matrix_local,
+                    parent_matrix=parent_matrix,
+                    parent_matrix_local=pbone.parent.bone.matrix_local,
+                )
+            else:
+                matrix = pbone.bone.convert_local_to_pose(
+                    pbone.matrix_basis,
+                    pbone.bone.matrix_local,
+                )
+        for child in pbone.children:
+            rec(child, matrix)
+
+    for pbone in obj.pose.bones:
+        if not pbone.parent:
+            rec(pbone, None)
+
+    bpy.context.view_layer.update()
+    bpy.ops.object.mode_set(mode='OBJECT')
+
+    # apply armature modifier
+    for mesh_object in mesh_objects:
+        bpy.context.view_layer.objects.active = mesh_object
+        mesh_object.select_set(True)
+
+        for mod in list(mesh_object.modifiers):
+            if mod.type == 'ARMATURE':
+                bpy.ops.object.modifier_apply(modifier=mod.name)
+
+    # set bind pose to rest pose
+    bpy.context.view_layer.objects.active = armature
+    bpy.ops.object.mode_set(mode='POSE')
+    bpy.ops.pose.armature_apply()
+    bpy.ops.object.mode_set(mode='OBJECT')
+
+    # add new armature modifiers
+    for mesh_object in mesh_objects:
+        mod = mesh_object.modifiers.new(name="Armature", type='ARMATURE')
+        mod.object = armature
+        mod.use_vertex_groups = True
+
 
 def get_bind_matrix_transform():
     path = os.path.join(os.path.dirname(os.path.realpath(__file__)), "assets", "bind_matrix_transform.json")
