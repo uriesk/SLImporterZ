@@ -324,6 +324,7 @@ default
 
             if (did_set == TRUE && i == 0)
             {
+                llRemoveInventory(llGetScriptName());
                 return;
             }
         }

@@ -23,6 +23,8 @@ import math
 from mathutils import Vector, Matrix, Euler
 import json
 
+VOLBONES = ["UPPER_BACK", "LOWER_BACK", "LEFT_PEC", "RIGHT_PEC", "LEFT_HANDLE", "RIGHT_HANDLE", "BUTT"]
+
 
 def get_skeleton(use_pivot=False):
     tree = ET.parse(os.path.join(os.path.dirname(os.path.realpath(__file__)), "assets", "avatar_skeleton.xml"))
@@ -98,9 +100,6 @@ def add_skeleton(context):
         if bone["connected"]:
             b.use_connect = True
 
-        # TODO apply rotation to this skeleton, yes or no?
-        b.matrix = b.matrix @ bone["rot"]
-
     # Remove auto-created bone
     bpy.ops.object.mode_set(mode='EDIT', toggle=True)
 
@@ -110,6 +109,12 @@ def add_skeleton(context):
         if collection is None:
             collection = armature.collections.new(name=bone["group"])
         collection.assign(pose.bones[bone_name])
+
+    # TODO apply rotation to this skeleton, yes or no?
+    bpy.ops.object.mode_set(mode='EDIT', toggle=False)
+    for bone_name, bone in bones.items():
+        edit_bones[bone_name].matrix = edit_bones[bone_name].matrix @ bone["rot"]
+    bpy.ops.object.mode_set(mode='EDIT', toggle=True)
 
     # inverse_bind_matrix from SL data includes absolute translation, but
     # already transformed relative rotation and scale.

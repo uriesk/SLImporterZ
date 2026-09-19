@@ -481,8 +481,10 @@ def import_slm(stream, name, **kwargs):
                 bind_matrix_transform = bind_matrix_transforms[joint_names[i]]
 
                 bind_matrix = bind_matrix @ bind_matrix_transform
-
-                print("edit bone " + joint_names[i])
+    
+                if joint_names[i] in skeleton.VOLBONES:
+                    print("scale change " + joint_names[i], bind_matrix.to_scale())
+                    print(f"Rotation:\n{tuple(math.degrees(a) for a in bind_matrix.to_euler())}")
 
                 #---------------------------------------------------------------
                 # Moving armature instead of skinning mesh, requires EDIT mode
@@ -492,8 +494,6 @@ def import_slm(stream, name, **kwargs):
                 #old_bone_matrices[joint_names[i]] = armature_bone.matrix.copy() @ scale_matrix.inverted()
                 #armature_bone.matrix = bind_matrix
                 #---------------------------------------------------------------
-
-                print("scale change " + joint_names[i], bind_matrix.to_scale())
 
                 inverse_bind_matrix = bind_matrix.inverted()
                 inverse_bind_matrices.append(inverse_bind_matrix)
