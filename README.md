@@ -1,6 +1,8 @@
-# Blender SLImporterZ
+# SLImporterZ
 
-Blender AddOn for importing meshes from an OXP file created by LOstorm.
+Blender AddOn for importing meshes from an OXP file created by OpenSim / SecondLife viewers that support those, SLM meshes from viewer cache and default armatures.
+
+Development in progress.
 
 ## References
 
