@@ -91,7 +91,17 @@ default
         lsl_text += f"{subindent}used_names += [\"{lsl_escape(obj.name)}\"];\n"
         amount_added += 1
 
+        # See https://wiki.secondlife.com/wiki/LlSetPrimitiveParams
         params = []
+
+        if "sl_light" in obj:
+            light_data = json.loads(obj["sl_light"])
+            tint_color = light_data["color"]
+            # [ integer boolean, vector linear_color, float intensity, float radius, float falloff ]
+            params.append(f"\n{parindent}PRIM_POINT_LIGHT, TRUE, <{tint_color[0]:.3f}, {tint_color[1]:.3f}, {tint_color[2]:.3f}>, {light_data["intensity"]:.3f}, {light_data["radius"]:.3f}, {light_data["falloff"]:.3f}")
+            if "texture_uuid" in light_data:
+                # [ string texture, float fov, float focus, float ambiance ]
+                params.append(f"\n{parindent}PRIM_PROJECTOR, \"{lsl_escape(light_data["texture_uuid"])}\", {light_data["fov"]:.3f}, {light_data["focus"]:.3f}, {light_data["ambiance"]:.3f}")
 
         for i, material in enumerate(obj.data.materials):
             # recreate face properties based on material
@@ -124,8 +134,6 @@ default
                     break
             if not principled:
                 continue
-
-            # See https://wiki.secondlife.com/wiki/LlSetPrimitiveParams
 
             if "sl_fullbright" in material and material["sl_fullbright"] != 0:
                 params.append(f"\n{parindent}PRIM_FULLBRIGHT, {i}, TRUE")
@@ -162,7 +170,7 @@ default
                 from_node = base_color_input.links[0].from_node
                 if from_node.bl_idname == "ShaderNodeMix":
                     tint_color = from_node.inputs["B"].default_value
-                    tint_color = f"<{tint_color[0]:.2f}, {tint_color[1]:.2f}, {tint_color[2]:.2f}>"
+                    tint_color = f"<{tint_color[0]:.3f}, {tint_color[1]:.3f}, {tint_color[2]:.3f}>"
                     from_node_input = from_node.inputs["A"]
                     if from_node_input.links:
                         from_node = from_node_input.links[0].from_node
@@ -181,7 +189,7 @@ default
                             params.append(f"\n{parindent}PRIM_GLTF_BASE_COLOR, {i}, \"{lsl_escape(image["sl_uuid"])}\", <{texture_ss}, {texture_st}, 1.0>, <{texture_os}, {texture_ot}, 0.0>, {texture_rot}, {tint_color}, {alpha:.2f}, {alpha_mode}, {alpha_cutoff:.2f}, EMPTY_STRING")
             else:
                 tint_color = principled.inputs["Base Color"].default_value
-                tint_color = f"<{tint_color[0]:.2f}, {tint_color[1]:.2f}, {tint_color[2]:.2f}>"
+                tint_color = f"<{tint_color[0]:.3f}, {tint_color[1]:.3f}, {tint_color[2]:.3f}>"
                 if "pbrMetallicRoughness" in pbr_overrides:
                     params.append(f"\n{parindent}PRIM_GLTF_BASE_COLOR, {i}, \"\", \"\", \"\", \"\", {tint_color}, {alpha:.2f}, {alpha_mode}, {alpha_cutoff:.2f}, EMPTY_STRING")
 

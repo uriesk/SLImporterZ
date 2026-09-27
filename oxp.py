@@ -712,6 +712,26 @@ class OXPParser():
                 # quaternion
                 prim_rotation = prim_data.get("rotation")
 
+            custom_properties = { "sl_uuid": mesh_uuid }
+            # prim data that we cant interpret otherwise
+            prim_light = prim_data.get("light")
+            if "light" in prim_data:
+                light_data = prim_data["light"].copy()
+                # unused
+                del light_data["cutoff"]
+                # color alpha value is intensity
+                color = light_data["color"]
+                light_data["intensity"] = color[3]
+                light_data["color"] = color[:3]
+                # projector lights
+                if "light_texture" in prim_data and "texture" in prim_data["light_texture"]:
+                    light_data["texture_uuid"] = prim_data["light_texture"]["texture"]
+                    light_data["fov"] = prim_data["light_texture"]["params"][0]
+                    light_data["focus"] = prim_data["light_texture"]["params"][1]
+                    light_data["ambiance"] = prim_data["light_texture"]["params"][2]
+                # { color: list<4>, falloff, radius, texture_uuid, fov, focus, ambiance }
+                custom_properties["sl_light"] = json.dumps(light_data)
+
             with open(slm_filepath, 'rb') as f:
                 imported_mesh_objects = slm.import_slm(
                     f,
@@ -719,7 +739,7 @@ class OXPParser():
                     filepath=slm_filepath,
                     create_debug_info=self.create_debug_info,
                     extract_lods=self.extract_lods,
-                    custom_properties={ "sl_uuid": mesh_uuid },
+                    custom_properties=custom_properties,
                     collection_name=collection_name,
                     prim_position=prim_position,
                     prim_rotation=prim_rotation,
