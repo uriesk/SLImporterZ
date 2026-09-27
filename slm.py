@@ -516,7 +516,7 @@ def import_slm(stream, name, **kwargs):
             # alter the default Second Life skeleton
             print("pelvis_offset" + str(skin_data["pelvis_offset"]))
 
-    for lod_name, type_name in (("high_lod", None), ("medium_lod", "LOD2"), ("low_lod", "LOD1"), ("lowest_lod", "LOD0")):
+    for lod_name, type_name in (("high_lod", None), ("medium_lod", "LOD2"), ("low_lod", "LOD1"), ("lowest_lod", "LOD0"), ("physics_mesh", "PHYS")):
 
         if lod_name in slm_metadata and (extract_lods or lod_name == "high_lod") and isinstance(slm_metadata[lod_name], dict):
             lod_offset = start_pos + header_size + slm_metadata[lod_name]["offset"]
@@ -565,7 +565,7 @@ def import_slm(stream, name, **kwargs):
                 bones=bones,
                 skin_to_armature=True,
             )
-            if mesh_object is not None:
+            if mesh_object is not None and lod_name != "physics_mesh":
                 imported_mesh_objects.append(mesh_object)
 
                 if armature is not None:
