@@ -714,23 +714,34 @@ class OXPParser():
 
             custom_properties = { "sl_uuid": mesh_uuid }
             # prim data that we cant interpret otherwise
-            prim_light = prim_data.get("light")
             if "light" in prim_data:
                 light_data = prim_data["light"].copy()
                 # unused
                 del light_data["cutoff"]
                 # color alpha value is intensity
-                color = light_data["color"]
+                color = light_data.get("color", [1.0, 1.0, 1.0, 1.0])
                 light_data["intensity"] = color[3]
                 light_data["color"] = color[:3]
                 # projector lights
-                if "light_texture" in prim_data and "texture" in prim_data["light_texture"]:
-                    light_data["texture_uuid"] = prim_data["light_texture"]["texture"]
-                    light_data["fov"] = prim_data["light_texture"]["params"][0]
-                    light_data["focus"] = prim_data["light_texture"]["params"][1]
-                    light_data["ambiance"] = prim_data["light_texture"]["params"][2]
+                if "light_texture" in prim_data:
+                    light_data["texture_uuid"] = prim_data["light_texture"].get("texture", "00000000-0000-0000-0000-000000000000")
+                    light_texture_params = prim_data["light_texture"].get("params", [1.571, 0.0, 0.0])
+                    light_data["fov"] = light_texture_params[0]
+                    light_data["focus"] = light_texture_params[1]
+                    light_data["ambiance"] = light_texture_params[2]
                 # { color: list<4>, falloff, radius, texture_uuid, fov, focus, ambiance }
                 custom_properties["sl_light"] = json.dumps(light_data)
+            if "ExtraPhysics" in prim_data:
+                physics_data = prim_data["ExtraPhysics"]
+                custom_properties["sl_physics"] = json.dumps({
+                    # 0: PRIM, 1: NONE, 2: CONVEX
+                    "shape": physics_data.get("PhysicsShapeType", 2),
+                    "gravity": physics_data.get("GravityMultiplier", 1.0),
+                    "friction": physics_data.get("Friction", 0.6),
+                    "density": physics_data.get("Density", 1000.0),
+                    "bounciness": physics_data.get("Restitution", 0.5),
+                    "material_type": prim_data.get("material", 3)
+                })
 
             with open(slm_filepath, 'rb') as f:
                 imported_mesh_objects = slm.import_slm(

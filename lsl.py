@@ -103,6 +103,13 @@ default
                 # [ string texture, float fov, float focus, float ambiance ]
                 params.append(f"\n{parindent}PRIM_PROJECTOR, \"{lsl_escape(light_data["texture_uuid"])}\", {light_data["fov"]:.3f}, {light_data["focus"]:.3f}, {light_data["ambiance"]:.3f}")
 
+        if "sl_physics" in obj:
+            physics_data = json.loads(obj["sl_physics"])
+            params.append(f"\n{parindent}PRIM_MATERIAL, {physics_data["material_type"]}")
+            params.append(f"\n{parindent}PRIM_PHYSICS_SHAPE_TYPE, {physics_data["shape"]}")
+            # set material params if parent prim
+            lsl_text += f"{subindent}if (i == 0)\n{subindent}{{\n{parindent}llSetPhysicsMaterial(GRAVITY_MULTIPLIER | RESTITUTION | FRICTION | DENSITY, {physics_data["gravity"]:.3f}, {physics_data["bounciness"]:.3f}, {physics_data["friction"]:.3f}, {physics_data["density"]:.3f});\n{subindent}}}\n"
+
         for i, material in enumerate(obj.data.materials):
             # recreate face properties based on material
             face_tree = {}
