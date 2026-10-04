@@ -1,0 +1,11 @@
+2026-09-03  uriesk  <uriesk@posteo.de>
+
+    version 0.0.1
+    * README.md: Start project
+    * blender_manifest.toml: Added Add-On manifest for blender-5.2
+    * COPYING: Added GPL-3-or-later
+    * __init__.py: Entry point
+    * collada.py: Added collada importer / exporter from public sources
+    * slm.py: SLM import
+    * oxp.py: OXP import
+    * llsdz.py: Implementation of LLSD

@@ -1,0 +1,31 @@
+schema_version = "1.0.0"
+
+id = "slimporterz"
+version = "0.0.1"
+name = "SL ImporterZ"
+tagline = "Import various OpenSim or Second Life data"
+maintainer = "uriesk"
+type = "add-on"
+website = "https://github.com/uriesk/SLImporterZ"
+
+tags = ["Import-Export"]
+
+blender_version_min = "5.2.0"
+
+license = [
+  "SPDX:GPL-3.0-or-later",
+]
+
+[permissions]
+files = "Import SLM / OXP / skeleton files from disk"
+
+# # Optional: advanced build settings.
+# # https://docs.blender.org/manual/en/latest/advanced/command_line/extension_arguments.html#command-line-args-extension-build
+# [build]
+# # These are the default build excluded patterns.
+# # You only need to edit them if you want different options.
+# paths_exclude_pattern = [
+#   "__pycache__/",
+#   "/.git/",
+#   "/*.zip",
+# ]
