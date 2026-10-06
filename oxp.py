@@ -803,6 +803,7 @@ class OXPParser():
                 materials = self._create_materials_for_prim(prim_data, name)
 
                 for obj_data in mesh_objects:
+                    lod_name = obj_data["lod_name"]
                     type_name = obj_data["type_name"]
                     obj = obj_data["obj"]
 
@@ -823,10 +824,13 @@ class OXPParser():
                             obj.rotation_quaternion = Quaternion((prim_rotation[3], prim_rotation[0], prim_rotation[1], prim_rotation[2]))
 
                     # apply materials (to object, not mesh data)
-                    for i, material in enumerate(materials):
-                        slot = obj.material_slots[i]
-                        slot.link = 'OBJECT'
-                        slot.material = material
+                    if lod_name != "physics_mesh":
+                        for i, material in enumerate(materials):
+                            if not material or i >= len(obj.material_slots):
+                                break
+                            slot = obj.material_slots[i]
+                            slot.link = 'OBJECT'
+                            slot.material = material
 
                 self.amount_imported_meshes += len(imported_mesh_objects)
 

@@ -78,6 +78,8 @@ default
     for obj in bpy.data.objects:
         if obj.type != "MESH":
             continue
+        if obj.name.endswith(('_LOD0', '_LOD1', '_LOD2', '_PHYS')):
+            continue
 
         object_tree = []
         objects_tree[obj.name] = object_tree

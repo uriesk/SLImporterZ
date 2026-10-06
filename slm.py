@@ -563,7 +563,7 @@ def import_slm(stream, name, **kwargs):
                 bones=bones,
                 skin_to_armature=True,
             )
-            if mesh_object is not None and lod_name != "physics_mesh":
+            if mesh_object is not None:
                 imported_mesh_objects.append({
                     "lod_name": lod_name,
                     "type_name": type_name,
