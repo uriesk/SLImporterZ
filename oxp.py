@@ -559,12 +559,12 @@ class OXPParser():
                     texcoord = nodes.new("ShaderNodeTexCoord")
                     texcoord.location = (-1000, vertical_start)
                     mapping_node = nodes.new("ShaderNodeMapping")
-                    mapping_node.vector_type = "POINT"
+                    mapping_node.vector_type = "TEXTURE"
                     mapping_node.location = (-800, vertical_start)
                     links.new(texcoord.outputs["UV"], mapping_node.inputs["Vector"])
                     links.new(mapping_node.outputs["Vector"], tex_node.inputs["Vector"])
                     mapping_node.inputs["Location"].default_value = (color_texture_os, color_texture_ot, 0.0)
-                    mapping_node.inputs["Scale"].default_value    = (color_texture_ss, color_texture_st, 1.0)
+                    mapping_node.inputs["Scale"].default_value    = (1.0 / color_texture_ss, 1.0 / color_texture_st, 1.0)
                     mapping_node.inputs["Rotation"].default_value = (0.0, 0.0, color_texture_rot)
                 vertical_start -= 280
 
@@ -583,12 +583,12 @@ class OXPParser():
                     texcoord = nodes.new("ShaderNodeTexCoord")
                     texcoord.location = (-1000, vertical_start)
                     mapping_node = nodes.new("ShaderNodeMapping")
-                    mapping_node.vector_type = 'POINT'           # important
+                    mapping_node.vector_type = "TEXTURE"
                     mapping_node.location = (-800, vertical_start)
                     links.new(texcoord.outputs["UV"], mapping_node.inputs["Vector"])
                     links.new(mapping_node.outputs["Vector"], normal_tex.inputs["Vector"])
                     mapping_node.inputs["Location"].default_value = (normal_texture_os, normal_texture_ot, 0.0)
-                    mapping_node.inputs["Scale"].default_value    = (normal_texture_ss, normal_texture_st, 1.0)
+                    mapping_node.inputs["Scale"].default_value    = (1.0 / normal_texture_ss, 1.0 / normal_texture_st, 1.0)
                     mapping_node.inputs["Rotation"].default_value = (0.0, 0.0, normal_texture_rot)
                 vertical_start -= 280
 
@@ -609,12 +609,12 @@ class OXPParser():
                     texcoord = nodes.new("ShaderNodeTexCoord")
                     texcoord.location = (-1000, vertical_start)
                     mapping_node = nodes.new("ShaderNodeMapping")
-                    mapping_node.vector_type = 'POINT'           # important
+                    mapping_node.vector_type = "TEXTURE"
                     mapping_node.location = (-800, vertical_start)
                     links.new(texcoord.outputs["UV"], mapping_node.inputs["Vector"])
                     links.new(mapping_node.outputs["Vector"], orm_node.inputs["Vector"])
                     mapping_node.inputs["Location"].default_value = (orm_texture_os, orm_texture_ot, 0.0)
-                    mapping_node.inputs["Scale"].default_value    = (orm_texture_ss, orm_texture_st, 1.0)
+                    mapping_node.inputs["Scale"].default_value    = (1.0 / orm_texture_ss, 1.0 / orm_texture_st, 1.0)
                     mapping_node.inputs["Rotation"].default_value = (0.0, 0.0, orm_texture_rot)
                 vertical_start -= 280
 
@@ -636,12 +636,12 @@ class OXPParser():
                     texcoord = nodes.new("ShaderNodeTexCoord")
                     texcoord.location = (-1000, vertical_start)
                     mapping_node = nodes.new("ShaderNodeMapping")
-                    mapping_node.vector_type = 'POINT'           # important
+                    mapping_node.vector_type = "TEXTURE"
                     mapping_node.location = (-800, vertical_start)
                     links.new(texcoord.outputs["UV"], mapping_node.inputs["Vector"])
                     links.new(mapping_node.outputs["Vector"], spec_tex.inputs["Vector"])
                     mapping_node.inputs["Location"].default_value = (specular_texture_os, specular_texture_ot, 0.0)
-                    mapping_node.inputs["Scale"].default_value    = (specular_texture_ss, specular_texture_st, 1.0)
+                    mapping_node.inputs["Scale"].default_value    = (1.0 / specular_texture_ss, 1.0 / specular_texture_st, 1.0)
                     mapping_node.inputs["Rotation"].default_value = (0.0, 0.0, specular_texture_rot)
                 vertical_start -= 280
 
@@ -657,12 +657,12 @@ class OXPParser():
                     texcoord = nodes.new("ShaderNodeTexCoord")
                     texcoord.location = (-1000, vertical_start)
                     mapping_node = nodes.new("ShaderNodeMapping")
-                    mapping_node.vector_type = 'POINT'           # important
+                    mapping_node.vector_type = "TEXTURE"
                     mapping_node.location = (-800, vertical_start)
                     links.new(texcoord.outputs["UV"], mapping_node.inputs["Vector"])
                     links.new(mapping_node.outputs["Vector"], emissive_node.inputs["Vector"])
                     mapping_node.inputs["Location"].default_value = (emissive_texture_os, emissive_texture_ot, 0.0)
-                    mapping_node.inputs["Scale"].default_value    = (emissive_texture_ss, emissive_texture_st, 1.0)
+                    mapping_node.inputs["Scale"].default_value    = (1.0 / emissive_texture_ss, 1.0 / emissive_texture_st, 1.0)
                     mapping_node.inputs["Rotation"].default_value = (0.0, 0.0, emissive_texture_rot)
 
             materials.append(mat)

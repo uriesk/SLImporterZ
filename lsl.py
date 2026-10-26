@@ -37,6 +37,8 @@ def _get_trans(node):
         if mapping_node.bl_idname == "ShaderNodeMapping":
             texture_os, texture_ot, _ = mapping_node.inputs["Location"].default_value
             texture_ss, texture_st, _ = mapping_node.inputs["Scale"].default_value
+            texture_ss = 1.0 / texture_ss
+            texture_st = 1.0 / texture_st
             _, _, texture_rot = mapping_node.inputs["Rotation"].default_value
 
     return (f"{texture_os:.6f}", f"{texture_ot:.6f}", f"{texture_ss:.6f}", f"{texture_st:.6f}", f"{texture_rot:.3f}")
