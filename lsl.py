@@ -47,6 +47,9 @@ def create_lsl_script():
     # creates lsl script and object tree for setting properties and textures
     # by uuid
     objects_tree = {}
+    if not bpy.data.objects:
+        return "default\n{\n    \\\\ No Objects Available\n}", objects_tree
+
     lsl_text = """vector WHITE = <1.0, 1.0, 1.0>;
 string EMPTY_STRING = "";
 
@@ -98,14 +101,20 @@ default
         # See https://wiki.secondlife.com/wiki/LlSetPrimitiveParams
         params = []
 
-        if "sl_light" in obj:
-            light_data = json.loads(obj["sl_light"])
-            tint_color = light_data["color"]
-            # [ integer boolean, vector linear_color, float intensity, float radius, float falloff ]
-            params.append(f"\n{parindent}PRIM_POINT_LIGHT, TRUE, <{tint_color[0]:.3f}, {tint_color[1]:.3f}, {tint_color[2]:.3f}>, {light_data["intensity"]:.3f}, {light_data["radius"]:.3f}, {light_data["falloff"]:.3f}")
-            if "texture_uuid" in light_data:
-                # [ string texture, float fov, float focus, float ambiance ]
-                params.append(f"\n{parindent}PRIM_PROJECTOR, \"{lsl_escape(light_data["texture_uuid"])}\", {light_data["fov"]:.3f}, {light_data["focus"]:.3f}, {light_data["ambiance"]:.3f}")
+        if "sl_particles" in obj:
+            particle_data = json.loads(obj["sl_particles"])
+            particle_params = []
+            for key, value in particle_data.items():
+                if isinstance(value, list):
+                    if len(value) == 2:
+                        value.append(0)
+                    value = f"<{value[0]:.8f}, {value[1]:.8f}, {value[2]:.8f}>"
+                elif isinstance(value, float):
+                    value = f"{value:.8f}"
+                elif not isinstance(value, str):
+                    value = str(value)
+                particle_params.append(f"\n{parindent}{key}, {value}")
+            lsl_text += f"{subindent}llLinkParticleSystem(link_num, [{",".join(particle_params)}\n{subindent}]);\n"
 
         if "sl_physics" in obj:
             physics_data = json.loads(obj["sl_physics"])
@@ -120,6 +129,18 @@ default
                 params.append(f"\n{parindent}PRIM_PHYSICS_SHAPE_TYPE, {physics_shape}")
             else:
                 lsl_text += f"{subindent}else\n{subindent}{{\n{parindent}llSetLinkPrimitiveParamsFast(link_num, [PRIM_PHYSICS_SHAPE_TYPE, {physics_shape}]);\n{subindent}}}\n"
+
+        if "sl_description" in obj:
+            params.append(f"\n{parindent}PRIM_DESC, \"{lsl_escape(obj["sl_description"])}\"")
+
+        if "sl_light" in obj:
+            light_data = json.loads(obj["sl_light"])
+            tint_color = light_data["color"]
+            # [ integer boolean, vector linear_color, float intensity, float radius, float falloff ]
+            params.append(f"\n{parindent}PRIM_POINT_LIGHT, TRUE, <{tint_color[0]:.3f}, {tint_color[1]:.3f}, {tint_color[2]:.3f}>, {light_data["intensity"]:.3f}, {light_data["radius"]:.3f}, {light_data["falloff"]:.3f}")
+            if "texture_uuid" in light_data:
+                # [ string texture, float fov, float focus, float ambiance ]
+                params.append(f"\n{parindent}PRIM_PROJECTOR, \"{lsl_escape(light_data["texture_uuid"])}\", {light_data["fov"]:.3f}, {light_data["focus"]:.3f}, {light_data["ambiance"]:.3f}")
 
         for i, slot in enumerate(obj.material_slots):
             material = slot.material

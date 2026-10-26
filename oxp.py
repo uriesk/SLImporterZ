@@ -770,6 +770,50 @@ class OXPParser():
                     prim_rotation = prim_data.get("rotation")
 
                 custom_properties = { "sl_uuid": mesh_uuid }
+                # description
+                if "description" in prim_data and prim_data["description"] != "(No Description)":
+                    custom_properties["sl_description"] = prim_data["description"]
+                # particles
+                # store them as a dict with all the right lsl constant names
+                # https://wiki.secondlife.com/wiki/LlParticleSystem
+                if "particle" in prim_data:
+                    particle_prim_data = prim_data["particle"]
+                    particle_data = {}
+                    # part flags
+                    psys_part_flags = 0
+                    for flag_name, flag_value in (("LL_PART_BOUNCE_MASK", 0x004), ("LL_PART_EMISSIVE_MASK", 0x100), ("LL_PART_FOLLOW_SRC_MASK", 0x010), ("LL_PART_FOLLOW_VELOCITY_MASK", 0x020), ("LL_PART_INTERP_COLOR_MASK", 0x001), ("LL_PART_INTERP_SCALE_MASK", 0x002), ("LL_PART_RIBBON_MASK", 0x400), ("LL_PART_TARGET_LINEAR_MASK", 0x080), ("LL_PART_TARGET_POS_MASK", 0x040), ("LL_PART_WIND_MASK", 0x008), ("LL_PART_BEAM_MASK", 0x200)):
+                        if flag_name in particle_prim_data and particle_prim_data[flag_name]:
+                            psys_part_flags = psys_part_flags | flag_value
+                    if psys_part_flags:
+                        particle_data["PSYS_PART_FLAGS"] = psys_part_flags
+                    # pattern flags
+                    psys_scr_pattern = 0
+                    for flag_name, flag_value in (("LL_PART_SRC_PATTERN_EXPLODE", 0x02), ("LL_PART_SRC_PATTERN_ANGLE_CONE", 0x08), ("LL_PART_SRC_PATTERN_ANGLE", 0x04), ("LL_PART_SRC_PATTERN_DROP", 0x01), ("LL_PART_SRC_PATTERN_ANGLE_CONE_EMPTY", 0x10)):
+                        if flag_name in particle_prim_data and particle_prim_data[flag_name]:
+                            psys_scr_pattern = psys_scr_pattern | flag_value
+                    if psys_scr_pattern:
+                        particle_data["PSYS_SRC_PATTERN"] = psys_scr_pattern
+                    # directly taken values
+                    # Inner and outer angle are deprecated values and angle
+                    # begin and end are its replacements, but we only get the
+                    # older, so we use those.
+                    # TODO: Confirm that this actually represents the same
+                    for part_key, part_lls_name in (("BurstRadius", "PSYS_SRC_BURST_RADIUS"), ("InnerAngle", "PSYS_SRC_ANGLE_BEGIN"), ("OuterAngle", "PSYS_SRC_ANGLE_END"), ("TargetId", "PSYS_SRC_TARGET_KEY"), ("StartScale", "PSYS_PART_START_SCALE"), ("EndScale", "PSYS_PART_END_SCALE"), ("PartImageID", "PSYS_SRC_TEXTURE"), ("StartGlow", "PSYS_PART_START_GLOW"), ("EndGlow", "PSYS_PART_END_GLOW"), ("BlendFuncSource", "PSYS_PART_BLEND_FUNC_SOURCE"), ("BlendFuncDest", "PSYS_PART_BLEND_FUNC_DEST"), ("SourceMaxAge", "PSYS_SRC_MAX_AGE"), ("ParticleMaxAge", "PSYS_PART_MAX_AGE"), ("BurstRate", "PSYS_SRC_BURST_RATE"), ("BurstPartCount", "PSYS_SRC_BURST_PART_COUNT"), ("AngularVelocity", "PSYS_SRC_OMEGA"), ("BurstSpeedMin", "PSYS_SRC_BURST_SPEED_MIN"), ("BurstSpeedMax", "PSYS_SRC_BURST_SPEED_MAX"), ("PartAccel", "PSYS_SRC_ACCEL")):
+                        if part_key in particle_prim_data and particle_prim_data[part_key]:
+                            particle_data[part_lls_name] = particle_prim_data[part_key]
+                    # colors
+                    if "StartColor" in particle_prim_data and isinstance(particle_prim_data["StartColor"], list):
+                        start_color = particle_prim_data["StartColor"]
+                        particle_data["PSYS_PART_START_COLOR"] = start_color[0:3]
+                        if start_color[3]:
+                            particle_data["PSYS_PART_START_ALPHA"] = start_color[2]
+                    if "EndColor" in particle_prim_data and isinstance(particle_prim_data["EndColor"], list):
+                        end_color = particle_prim_data["EndColor"]
+                        particle_data["PSYS_PART_END_COLOR"] = end_color[0:3]
+                        if end_color[3]:
+                            particle_data["PSYS_PART_END_ALPHA"] = end_color[3]
+                    if particle_data:
+                        custom_properties["sl_particles"] = json.dumps(particle_data)
                 # prim data that we cant interpret otherwise
                 if "light" in prim_data:
                     light_data = prim_data["light"].copy()
