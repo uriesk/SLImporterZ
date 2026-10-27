@@ -716,7 +716,7 @@ class OXPParser():
         if "uuid" in prim_data:
             custom_properties["sl_uuid"] = prim_data["uuid"]
         # description
-        if "description" in prim_data and prim_data["description"] != "(No Description)":
+        if "description" in prim_data and prim_data["description"] and prim_data["description"] != "(No Description)":
             custom_properties["sl_description"] = prim_data["description"]
         # particles
         # store them as a dict with all the right lsl constant names
@@ -819,8 +819,10 @@ default
 {
     state_entry()
     {\n"""
-            object_lsl_text, _ = lsl.create_object_properties_lsl(fake_obj, "        ", False)
-            lsl_text += object_lsl_text + "        llRemoveInventory(llGetScriptName());\n    }\n}"
+            subindent = "        "
+            shape_lsl_text = lsl.create_prim_shape_lsl(prim_data.get("volume"), prim_data.get("scale"), subindent)
+            object_lsl_text, _ = lsl.create_object_properties_lsl(fake_obj, subindent, False)
+            lsl_text += shape_lsl_text + object_lsl_text + subindent + "llRemoveInventory(llGetScriptName());\n    }\n}"
 
             text_block_name = "LSL Prim Params " + name
             text_block = bpy.data.texts.get(text_block_name)
@@ -910,7 +912,7 @@ default
                 slm.move_objs_into_collections(mesh_objects, collection_name)
 
                 # determine translation
-                prim_scale=prim_data.get("scale", [1.0, 1.0, 1.0])
+                prim_scale = prim_data.get("scale", [1.0, 1.0, 1.0])
                 prim_position = None
                 prim_rotation = None
                 if parent_uuid:

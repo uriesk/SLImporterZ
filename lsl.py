@@ -18,6 +18,7 @@
 
 import bpy
 import json
+import math
 
 from . import utils
 
@@ -42,6 +43,88 @@ def _get_trans(node):
             _, _, texture_rot = mapping_node.inputs["Rotation"].default_value
 
     return (f"{texture_os:.6f}", f"{texture_ot:.6f}", f"{texture_ss:.6f}", f"{texture_st:.6f}", f"{texture_rot:.3f}")
+
+def create_prim_shape_lsl(prim_volume_data, prim_scale, subindent, link_reference_text = "LINK_THIS"):
+    if not prim_volume_data or not prim_scale:
+        return ""
+    path = prim_volume_data.get("path")
+    profile = prim_volume_data.get("profile")
+    if not path or not profile:
+        return ""
+
+    parindent = subindent + "    "
+    lsl_text = f"{subindent}llSetLinkPrimitiveParamsFast({link_reference_text}, [\n"
+
+    lsl_text += f"{parindent}PRIM_SIZE, <{prim_scale[0]:.6f}, {prim_scale[1]:.6f}, {prim_scale[2]:.6f}>,\n"
+
+    path_curve = path.get("curve")
+    profile_curve = profile.get("curve")
+    profile_outer = profile_curve & 0x0F
+    profile_inner = profile_curve & 0xF0
+
+    prim_type = None;
+    # Shapes are created by a 2D shape (profile) moved over a path
+    # see viewer code llpanelobject.cpp:1773
+    match (profile_outer, path_curve):
+        case (0x00, 0x10):
+            # circle, line
+            prim_type = "PRIM_TYPE_CYLINDER"
+            twist_bound = 180
+        case (0x00, 0x20):
+            # circle, circle
+            # NOTE: This could also be a sculpt
+            prim_type = "PRIM_TYPE_TORUS"
+            twist_bound = 360
+        case (0x01, 0x10):
+            # square, line
+            prim_type = "PRIM_TYPE_BOX"
+            twist_bound = 180
+        case (0x01, 0x20):
+            # square, circle
+            prim_type = "PRIM_TYPE_TUBE"
+            twist_bound = 360
+        case (0x03, 0x10):
+            # equaltri, line
+            prim_type = "PRIM_TYPE_PRISM"
+            twist_bound = 180
+        case (0x03, 0x20):
+            # equaltri, circle
+            prim_type = "PRIM_TYPE_RING"
+            twist_bound = 360
+        case (0x05, 0x20):
+            # half circle, circle
+            prim_type = "PRIM_TYPE_SPHERE"
+            twist_bound = 360
+        case _:
+            return ""
+    lsl_text += f"{parindent}PRIM_TYPE, {prim_type},\n"
+
+    hole_shape = None;
+    match profile_inner:
+        case 0x10:
+            hole_shape = "PRIM_HOLE_CIRCLE"
+        case 0x20:
+            hole_shape = "PRIM_HOLE_SQUARE"
+        case 0x30:
+            hole_shape = "PRIM_HOLE_TRIANGLE"
+        case _:
+            hole_shape = "PRIM_HOLE_DEFAULT"
+    # integer hole_shape, vector cut, float hollow, vector twist
+    lsl_text += f"{parindent}{hole_shape}, <{path["begin"]:.6f}, {path["end"]:.6f}, 0.0>, {profile["hollow"]:.6f}, <{path["twist_begin"]:.6f}, {path["twist"]:.6f}, 0.0>,\n"
+
+    match prim_type:
+        case "PRIM_TYPE_SPHERE":
+            # vector dimple
+            lsl_text += f"{parindent}<{profile["begin"]:.6f}, {profile["end"]:.6f}, 0.0>\n"
+        case "PRIM_TYPE_BOX" | "PRIM_TYPE_CYLINDER" | "PRIM_TYPE_PRISM":
+            # vector top_size, vector top_shear
+            lsl_text += f"{parindent}<{path["scale_x"]:.6f}, {path["scale_y"]:.6f}, 0.0>, <{path["shear_x"]:.6f}, {path["shear_y"]:.6f}, 0.0>\n"
+        case "PRIM_TYPE_TORUS" | "PRIM_TYPE_TUBE" | "PRIM_TYPE_RING":
+            # vector hole_size, vector top_shear, vector advanced_cut, vector taper, float revolutions, float radius_offset, float skew
+            lsl_text += f"{parindent}<{path["scale_x"]:.6f}, {path["scale_y"]:.6f}, 0.0>, <{path["shear_x"]:.6f}, {path["shear_y"]:.6f}, 0.0>, <{profile["begin"]:.6f}, {profile["end"]:.6f}, 0.0>, <{path["taper_x"]:.6f}, {path["taper_y"]:.6f}, 0.0>, {path["revolutions"]:.6f}, {path["radius_offset"]:.6f}, {path["skew"]:.6f}\n"
+
+    lsl_text += subindent + "]);\n"
+    return lsl_text
 
 def create_object_properties_lsl(obj, subindent, is_linked = True):
     lsl_text = ""
