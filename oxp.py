@@ -21,6 +21,7 @@ import bpy
 from . import slm
 from . import llsdz
 from . import utils
+from . import lsl
 
 import os
 import time
@@ -89,14 +90,16 @@ class OXPParser():
         if not isinstance(prims, dict):
             return found_prims
 
-        for prim in prims.values():
+        for uuid, prim in prims.items():
             mesh = prim.get("mesh")
             # allow different ways of definign the uuid of the mesh in a prim
             if isinstance(mesh, str) and mesh == mesh_uuid:
+                prim["uuid"] = uuid
                 found_prims.append(prim)
             elif isinstance(mesh, dict):
                 for value in mesh.values():
                     if value == mesh_uuid:
+                        prim["uuid"] = uuid
                         found_prims.append(prim)
         return found_prims
 
@@ -485,6 +488,28 @@ class OXPParser():
                 if "alphaCutoff" in pbr_material:
                     alpha_cutoff = pbr_material.get("alphaCutoff", 0.0)
 
+            # sanitize scales
+            if not color_texture_ss:
+                color_texture_ss = 1.0
+            if not color_texture_st:
+                color_texture_st = 1.0
+            if not specular_texture_ss:
+                specular_texture_ss = 1.0
+            if not specular_texture_st:
+                specular_texture_st = 1.0
+            if not normal_texture_ss:
+                normal_texture_ss = 1.0
+            if not normal_texture_st:
+                normal_texture_st = 1.0
+            if not orm_texture_ss:
+                orm_texture_ss = 1.0
+            if not orm_texture_st:
+                orm_texture_st = 1.0
+            if not emissive_texture_ss:
+                emissive_texture_ss = 1.0
+            if not emissive_texture_st:
+                emissive_texture_st = 1.0
+
             # NOTE: Did not find a way to represent those in blender without
             # losing other informaion, so we store them in custom properties.
             # The least we have to store this way, the better.
@@ -681,7 +706,129 @@ class OXPParser():
                 f.write('\n'.join(tree_lines))
 
         self._parse_meshes_in_oxp_data()
+        self._parse_nonmeshes_in_oxp_data()
         self._add_unused_assets()
+
+    def _get_custom_sl_properties(self, prim_data):
+        # get properties of prim that can not be represented in blender itself
+        custom_properties = {}
+
+        if "uuid" in prim_data:
+            custom_properties["sl_uuid"] = prim_data["uuid"]
+        # description
+        if "description" in prim_data and prim_data["description"] != "(No Description)":
+            custom_properties["sl_description"] = prim_data["description"]
+        # particles
+        # store them as a dict with all the right lsl constant names
+        # https://wiki.secondlife.com/wiki/LlParticleSystem
+        if "particle" in prim_data:
+            particle_prim_data = prim_data["particle"]
+            particle_data = {}
+            # part flags
+            psys_part_flags = 0
+            for flag_name, flag_value in (("LL_PART_BOUNCE_MASK", 0x004), ("LL_PART_EMISSIVE_MASK", 0x100), ("LL_PART_FOLLOW_SRC_MASK", 0x010), ("LL_PART_FOLLOW_VELOCITY_MASK", 0x020), ("LL_PART_INTERP_COLOR_MASK", 0x001), ("LL_PART_INTERP_SCALE_MASK", 0x002), ("LL_PART_RIBBON_MASK", 0x400), ("LL_PART_TARGET_LINEAR_MASK", 0x080), ("LL_PART_TARGET_POS_MASK", 0x040), ("LL_PART_WIND_MASK", 0x008), ("LL_PART_BEAM_MASK", 0x200)):
+                if flag_name in particle_prim_data and particle_prim_data[flag_name]:
+                    psys_part_flags = psys_part_flags | flag_value
+            if psys_part_flags:
+                particle_data["PSYS_PART_FLAGS"] = psys_part_flags
+            # pattern flags
+            psys_scr_pattern = 0
+            for flag_name, flag_value in (("LL_PART_SRC_PATTERN_EXPLODE", 0x02), ("LL_PART_SRC_PATTERN_ANGLE_CONE", 0x08), ("LL_PART_SRC_PATTERN_ANGLE", 0x04), ("LL_PART_SRC_PATTERN_DROP", 0x01), ("LL_PART_SRC_PATTERN_ANGLE_CONE_EMPTY", 0x10)):
+                if flag_name in particle_prim_data and particle_prim_data[flag_name]:
+                    psys_scr_pattern = psys_scr_pattern | flag_value
+            if psys_scr_pattern:
+                particle_data["PSYS_SRC_PATTERN"] = psys_scr_pattern
+            # directly taken values
+            # Inner and outer angle are deprecated values and angle
+            # begin and end are its replacements, but we only get the
+            # older, so we use those.
+            # TODO: Confirm that this actually represents the same
+            for part_key, part_lls_name in (("BurstRadius", "PSYS_SRC_BURST_RADIUS"), ("InnerAngle", "PSYS_SRC_ANGLE_BEGIN"), ("OuterAngle", "PSYS_SRC_ANGLE_END"), ("TargetId", "PSYS_SRC_TARGET_KEY"), ("StartScale", "PSYS_PART_START_SCALE"), ("EndScale", "PSYS_PART_END_SCALE"), ("PartImageID", "PSYS_SRC_TEXTURE"), ("StartGlow", "PSYS_PART_START_GLOW"), ("EndGlow", "PSYS_PART_END_GLOW"), ("BlendFuncSource", "PSYS_PART_BLEND_FUNC_SOURCE"), ("BlendFuncDest", "PSYS_PART_BLEND_FUNC_DEST"), ("SourceMaxAge", "PSYS_SRC_MAX_AGE"), ("ParticleMaxAge", "PSYS_PART_MAX_AGE"), ("BurstRate", "PSYS_SRC_BURST_RATE"), ("BurstPartCount", "PSYS_SRC_BURST_PART_COUNT"), ("AngularVelocity", "PSYS_SRC_OMEGA"), ("BurstSpeedMin", "PSYS_SRC_BURST_SPEED_MIN"), ("BurstSpeedMax", "PSYS_SRC_BURST_SPEED_MAX"), ("PartAccel", "PSYS_SRC_ACCEL")):
+                if part_key in particle_prim_data and particle_prim_data[part_key]:
+                    particle_data[part_lls_name] = particle_prim_data[part_key]
+            # colors
+            if "StartColor" in particle_prim_data and isinstance(particle_prim_data["StartColor"], list):
+                start_color = particle_prim_data["StartColor"]
+                particle_data["PSYS_PART_START_COLOR"] = start_color[0:3]
+                if start_color[3]:
+                    particle_data["PSYS_PART_START_ALPHA"] = start_color[2]
+            if "EndColor" in particle_prim_data and isinstance(particle_prim_data["EndColor"], list):
+                end_color = particle_prim_data["EndColor"]
+                particle_data["PSYS_PART_END_COLOR"] = end_color[0:3]
+                if end_color[3]:
+                    particle_data["PSYS_PART_END_ALPHA"] = end_color[3]
+            if particle_data:
+                custom_properties["sl_particles"] = json.dumps(particle_data)
+        # prim data that we cant interpret otherwise
+        if "light" in prim_data:
+            light_data = prim_data["light"].copy()
+            # unused
+            del light_data["cutoff"]
+            # color alpha value is intensity
+            color = light_data.get("color", [1.0, 1.0, 1.0, 1.0])
+            light_data["intensity"] = color[3]
+            light_data["color"] = color[:3]
+            # projector lights
+            if "light_texture" in prim_data:
+                light_data["texture_uuid"] = prim_data["light_texture"].get("texture", "00000000-0000-0000-0000-000000000000")
+                light_texture_params = prim_data["light_texture"].get("params", [1.571, 0.0, 0.0])
+                light_data["fov"] = light_texture_params[0]
+                light_data["focus"] = light_texture_params[1]
+                light_data["ambiance"] = light_texture_params[2]
+            # { color: list<4>, falloff, radius, texture_uuid, fov, focus, ambiance }
+            custom_properties["sl_light"] = json.dumps(light_data)
+        if "ExtraPhysics" in prim_data:
+            physics_data = prim_data["ExtraPhysics"]
+            custom_properties["sl_physics"] = json.dumps({
+                # 0: PRIM, 1: NONE, 2: CONVEX
+                "shape": physics_data.get("PhysicsShapeType", 2),
+                "gravity": physics_data.get("GravityMultiplier", 1.0),
+                "friction": physics_data.get("Friction", 0.6),
+                "density": physics_data.get("Density", 1000.0),
+                "bounciness": physics_data.get("Restitution", 0.5),
+                "material_type": prim_data.get("material", 3)
+            })
+
+        return custom_properties
+
+    def _parse_nonmeshes_in_oxp_data(self):
+        # for all prims that do not contain a mesh, we create an lsl script
+        # with it's basic params
+        prims_data = self.oxp_data.get("prim")
+        if not prims_data:
+            return
+
+        for prim_uuid, prim_data in prims_data.items():
+            if "mesh" in prim_data:
+                continue
+
+            name = prim_data.get("name")
+            if not name:
+                name = mesh_uuid
+            # create a fake object that lsl creation can take
+            fake_obj = self._get_custom_sl_properties(prim_data)
+            materials = self._create_materials_for_prim(prim_data, name)
+            fake_obj["material_slots"] = []
+            for i, material in enumerate(materials):
+                fake_obj["material_slots"].append({ "material": material })
+
+            lsl_text = """vector WHITE = <1.0, 1.0, 1.0>;
+string EMPTY_STRING = "";
+
+default
+{
+    state_entry()
+    {\n"""
+            object_lsl_text, _ = lsl.create_object_properties_lsl(fake_obj, "        ", False)
+            lsl_text += object_lsl_text + "        llRemoveInventory(llGetScriptName());\n    }\n}"
+
+            text_block_name = "LSL Prim Params " + name
+            text_block = bpy.data.texts.get(text_block_name)
+            if text_block is None:
+                text_block = bpy.data.texts.new(text_block_name)
+            text_block.clear()
+            text_block.write(lsl_text)
+            text_block.cursor_set(0)
 
     def _parse_meshes_in_oxp_data(self):
         # all assets within "mesh_asset" are considered meshes
@@ -731,6 +878,10 @@ class OXPParser():
             if not imported_mesh_objects:
                 continue
 
+            # assign uuid of mesh itself
+            for obj_data in imported_mesh_objects:
+                obj_data["obj"].data["sl_uuid"] = mesh_uuid
+
             for i, prim_data in enumerate(prims_with_mesh):
                 mesh_objects = imported_mesh_objects.copy()
 
@@ -769,81 +920,7 @@ class OXPParser():
                     # quaternion
                     prim_rotation = prim_data.get("rotation")
 
-                custom_properties = { "sl_uuid": mesh_uuid }
-                # description
-                if "description" in prim_data and prim_data["description"] != "(No Description)":
-                    custom_properties["sl_description"] = prim_data["description"]
-                # particles
-                # store them as a dict with all the right lsl constant names
-                # https://wiki.secondlife.com/wiki/LlParticleSystem
-                if "particle" in prim_data:
-                    particle_prim_data = prim_data["particle"]
-                    particle_data = {}
-                    # part flags
-                    psys_part_flags = 0
-                    for flag_name, flag_value in (("LL_PART_BOUNCE_MASK", 0x004), ("LL_PART_EMISSIVE_MASK", 0x100), ("LL_PART_FOLLOW_SRC_MASK", 0x010), ("LL_PART_FOLLOW_VELOCITY_MASK", 0x020), ("LL_PART_INTERP_COLOR_MASK", 0x001), ("LL_PART_INTERP_SCALE_MASK", 0x002), ("LL_PART_RIBBON_MASK", 0x400), ("LL_PART_TARGET_LINEAR_MASK", 0x080), ("LL_PART_TARGET_POS_MASK", 0x040), ("LL_PART_WIND_MASK", 0x008), ("LL_PART_BEAM_MASK", 0x200)):
-                        if flag_name in particle_prim_data and particle_prim_data[flag_name]:
-                            psys_part_flags = psys_part_flags | flag_value
-                    if psys_part_flags:
-                        particle_data["PSYS_PART_FLAGS"] = psys_part_flags
-                    # pattern flags
-                    psys_scr_pattern = 0
-                    for flag_name, flag_value in (("LL_PART_SRC_PATTERN_EXPLODE", 0x02), ("LL_PART_SRC_PATTERN_ANGLE_CONE", 0x08), ("LL_PART_SRC_PATTERN_ANGLE", 0x04), ("LL_PART_SRC_PATTERN_DROP", 0x01), ("LL_PART_SRC_PATTERN_ANGLE_CONE_EMPTY", 0x10)):
-                        if flag_name in particle_prim_data and particle_prim_data[flag_name]:
-                            psys_scr_pattern = psys_scr_pattern | flag_value
-                    if psys_scr_pattern:
-                        particle_data["PSYS_SRC_PATTERN"] = psys_scr_pattern
-                    # directly taken values
-                    # Inner and outer angle are deprecated values and angle
-                    # begin and end are its replacements, but we only get the
-                    # older, so we use those.
-                    # TODO: Confirm that this actually represents the same
-                    for part_key, part_lls_name in (("BurstRadius", "PSYS_SRC_BURST_RADIUS"), ("InnerAngle", "PSYS_SRC_ANGLE_BEGIN"), ("OuterAngle", "PSYS_SRC_ANGLE_END"), ("TargetId", "PSYS_SRC_TARGET_KEY"), ("StartScale", "PSYS_PART_START_SCALE"), ("EndScale", "PSYS_PART_END_SCALE"), ("PartImageID", "PSYS_SRC_TEXTURE"), ("StartGlow", "PSYS_PART_START_GLOW"), ("EndGlow", "PSYS_PART_END_GLOW"), ("BlendFuncSource", "PSYS_PART_BLEND_FUNC_SOURCE"), ("BlendFuncDest", "PSYS_PART_BLEND_FUNC_DEST"), ("SourceMaxAge", "PSYS_SRC_MAX_AGE"), ("ParticleMaxAge", "PSYS_PART_MAX_AGE"), ("BurstRate", "PSYS_SRC_BURST_RATE"), ("BurstPartCount", "PSYS_SRC_BURST_PART_COUNT"), ("AngularVelocity", "PSYS_SRC_OMEGA"), ("BurstSpeedMin", "PSYS_SRC_BURST_SPEED_MIN"), ("BurstSpeedMax", "PSYS_SRC_BURST_SPEED_MAX"), ("PartAccel", "PSYS_SRC_ACCEL")):
-                        if part_key in particle_prim_data and particle_prim_data[part_key]:
-                            particle_data[part_lls_name] = particle_prim_data[part_key]
-                    # colors
-                    if "StartColor" in particle_prim_data and isinstance(particle_prim_data["StartColor"], list):
-                        start_color = particle_prim_data["StartColor"]
-                        particle_data["PSYS_PART_START_COLOR"] = start_color[0:3]
-                        if start_color[3]:
-                            particle_data["PSYS_PART_START_ALPHA"] = start_color[2]
-                    if "EndColor" in particle_prim_data and isinstance(particle_prim_data["EndColor"], list):
-                        end_color = particle_prim_data["EndColor"]
-                        particle_data["PSYS_PART_END_COLOR"] = end_color[0:3]
-                        if end_color[3]:
-                            particle_data["PSYS_PART_END_ALPHA"] = end_color[3]
-                    if particle_data:
-                        custom_properties["sl_particles"] = json.dumps(particle_data)
-                # prim data that we cant interpret otherwise
-                if "light" in prim_data:
-                    light_data = prim_data["light"].copy()
-                    # unused
-                    del light_data["cutoff"]
-                    # color alpha value is intensity
-                    color = light_data.get("color", [1.0, 1.0, 1.0, 1.0])
-                    light_data["intensity"] = color[3]
-                    light_data["color"] = color[:3]
-                    # projector lights
-                    if "light_texture" in prim_data:
-                        light_data["texture_uuid"] = prim_data["light_texture"].get("texture", "00000000-0000-0000-0000-000000000000")
-                        light_texture_params = prim_data["light_texture"].get("params", [1.571, 0.0, 0.0])
-                        light_data["fov"] = light_texture_params[0]
-                        light_data["focus"] = light_texture_params[1]
-                        light_data["ambiance"] = light_texture_params[2]
-                    # { color: list<4>, falloff, radius, texture_uuid, fov, focus, ambiance }
-                    custom_properties["sl_light"] = json.dumps(light_data)
-                if "ExtraPhysics" in prim_data:
-                    physics_data = prim_data["ExtraPhysics"]
-                    custom_properties["sl_physics"] = json.dumps({
-                        # 0: PRIM, 1: NONE, 2: CONVEX
-                        "shape": physics_data.get("PhysicsShapeType", 2),
-                        "gravity": physics_data.get("GravityMultiplier", 1.0),
-                        "friction": physics_data.get("Friction", 0.6),
-                        "density": physics_data.get("Density", 1000.0),
-                        "bounciness": physics_data.get("Restitution", 0.5),
-                        "material_type": prim_data.get("material", 3)
-                    })
-
+                custom_properties = self._get_custom_sl_properties(prim_data)
                 materials = self._create_materials_for_prim(prim_data, name)
 
                 for obj_data in mesh_objects:
