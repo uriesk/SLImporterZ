@@ -728,6 +728,7 @@ class SLIZ_IMPORT_slm(bpy.types.Operator, ImportHelper):
                 )
                 move_objs_into_collections(imported_mesh_objects)
         except Exception as e:
+            traceback.print_exc()
             self._notify({'ERROR'}, str(e))
             return {'CANCELLED'}
         return {'FINISHED'}

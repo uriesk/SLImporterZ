@@ -325,9 +325,9 @@ class OXPParser():
         # ensure same length
         amount_materials = max(len(materials_data), len(textures_data))
         if len(materials_data) < amount_materials:
-            materials_data += [None] * (amount_materials - len(materials_data))
+            materials_data += [{}] * (amount_materials - len(materials_data))
         if len(textures_data) < amount_materials:
-            textures_data += [None] * (amount_materials - len(textures_data))
+            textures_data += [{}] * (amount_materials - len(textures_data))
 
         for i in range(amount_materials):
             material_name = f"{name}{i}"
@@ -1109,6 +1109,7 @@ class SLIZ_IMPORT_oxp(bpy.types.Operator, ImportHelper):
         try:
             amount_imported_meshes, amount_meshes = oxp_parser.parse_from_file(self.filepath)
         except Exception as e:
+            traceback.print_exc()
             self._notify({'ERROR'}, str(e))
             return {'CANCELLED'}
 

@@ -251,7 +251,7 @@ def create_object_properties_lsl(obj, subindent, is_linked = True):
             params.append(f"\n{parindent}PRIM_GLOW, {i}, {material["sl_glow"]:.3f}")
 
         # tint color and alpha
-        tint_color = "<1.0, 1.0, 1.0>"
+        tint_color = "<1.000, 1.000, 1.000>"
         alpha = 1.0
 
         # alpha modes
@@ -305,7 +305,7 @@ def create_object_properties_lsl(obj, subindent, is_linked = True):
             if "pbrMetallicRoughness" in pbr_overrides:
                 params.append(f"\n{parindent}PRIM_GLTF_BASE_COLOR, {i}, \"\", \"\", \"\", \"\", {tint_color}, {alpha:.2f}, {alpha_mode}, {alpha_cutoff:.2f}, \"\"")
 
-        if tint_color != "<1.0, 1.0, 1.0>" or abs(alpha - 1.0) >= 0.0001:
+        if tint_color != "<1.000, 1.000, 1.000>" or abs(alpha - 1.0) >= 0.0001:
             params.append(f"\n{parindent}PRIM_COLOR, {i}, {tint_color}, {alpha:.2f}")
 
         # normal map
