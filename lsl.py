@@ -44,7 +44,9 @@ def _get_trans(node):
 
     return (f"{texture_os:.6f}", f"{texture_ot:.6f}", f"{texture_ss:.6f}", f"{texture_st:.6f}", f"{texture_rot:.3f}")
 
-def create_prim_shape_lsl(prim_volume_data, prim_scale, subindent, link_reference_text = "LINK_THIS"):
+def create_prim_shape_lsl(prim_data, subindent, link_reference_text = "LINK_THIS"):
+    prim_volume_data = prim_data.get("volume")
+    prim_scale = prim_data.get("scale")
     if not prim_volume_data or not prim_scale:
         return ""
     path = prim_volume_data.get("path")
@@ -62,55 +64,65 @@ def create_prim_shape_lsl(prim_volume_data, prim_scale, subindent, link_referenc
     profile_outer = profile_curve & 0x0F
     profile_inner = profile_curve & 0xF0
 
+    sculpt_texture_uuid = None
+    sculpt_type = 1
+    sculpt_data = prim_data.get("sculpt")
+    if sculpt_data:
+        sculpt_type = sculpt_data.get("type")
+        sculpt_texture_uuid = sculpt_data.get("texture")
+    if not sculpt_texture_uuid:
+        # this will be ignored from the server, we try anyway
+        mesh_data = prim_data.get("mesh")
+        if mesh_data:
+            sculpt_type = "PRIM_SCULPT_TYPE_MESH"
+            sculpt_texture_uuid = mesh_data.get("texture")
+
     prim_type = None;
     # Shapes are created by a 2D shape (profile) moved over a path
     # see viewer code llpanelobject.cpp:1773
-    match (profile_outer, path_curve):
-        case (0x00, 0x10):
-            # circle, line
-            prim_type = "PRIM_TYPE_CYLINDER"
-            twist_bound = 180
-        case (0x00, 0x20):
-            # circle, circle
-            # NOTE: This could also be a sculpt
-            prim_type = "PRIM_TYPE_TORUS"
-            twist_bound = 360
-        case (0x01, 0x10):
-            # square, line
-            prim_type = "PRIM_TYPE_BOX"
-            twist_bound = 180
-        case (0x01, 0x20):
-            # square, circle
-            prim_type = "PRIM_TYPE_TUBE"
-            twist_bound = 360
-        case (0x03, 0x10):
-            # equaltri, line
-            prim_type = "PRIM_TYPE_PRISM"
-            twist_bound = 180
-        case (0x03, 0x20):
-            # equaltri, circle
-            prim_type = "PRIM_TYPE_RING"
-            twist_bound = 360
-        case (0x05, 0x20):
-            # half circle, circle
-            prim_type = "PRIM_TYPE_SPHERE"
-            twist_bound = 360
-        case _:
-            return ""
+    if sculpt_texture_uuid:
+        prim_type = "PRIM_TYPE_SCULPT"
+    else:
+        match (profile_outer, path_curve):
+            case (0x00, 0x10):
+                # circle, line
+                prim_type = "PRIM_TYPE_CYLINDER"
+            case (0x00, 0x20):
+                # circle, circle
+                # NOTE: This could also be a sculpt
+                prim_type = "PRIM_TYPE_TORUS"
+            case (0x01, 0x10):
+                # square, line
+                prim_type = "PRIM_TYPE_BOX"
+            case (0x01, 0x20):
+                # square, circle
+                prim_type = "PRIM_TYPE_TUBE"
+            case (0x03, 0x10):
+                # equaltri, line
+                prim_type = "PRIM_TYPE_PRISM"
+            case (0x03, 0x20):
+                # equaltri, circle
+                prim_type = "PRIM_TYPE_RING"
+            case (0x05, 0x20):
+                # half circle, circle
+                prim_type = "PRIM_TYPE_SPHERE"
+            case _:
+                return ""
     lsl_text += f"{parindent}PRIM_TYPE, {prim_type},\n"
 
-    hole_shape = None;
-    match profile_inner:
-        case 0x10:
-            hole_shape = "PRIM_HOLE_CIRCLE"
-        case 0x20:
-            hole_shape = "PRIM_HOLE_SQUARE"
-        case 0x30:
-            hole_shape = "PRIM_HOLE_TRIANGLE"
-        case _:
-            hole_shape = "PRIM_HOLE_DEFAULT"
-    # integer hole_shape, vector cut, float hollow, vector twist
-    lsl_text += f"{parindent}{hole_shape}, <{path["begin"]:.6f}, {path["end"]:.6f}, 0.0>, {profile["hollow"]:.6f}, <{path["twist_begin"]:.6f}, {path["twist"]:.6f}, 0.0>,\n"
+    if prim_type != "PRIM_TYPE_SCULPT":
+        hole_shape = None;
+        match profile_inner:
+            case 0x10:
+                hole_shape = "PRIM_HOLE_CIRCLE"
+            case 0x20:
+                hole_shape = "PRIM_HOLE_SQUARE"
+            case 0x30:
+                hole_shape = "PRIM_HOLE_TRIANGLE"
+            case _:
+                hole_shape = "PRIM_HOLE_DEFAULT"
+        # integer hole_shape, vector cut, float hollow, vector twist
+        lsl_text += f"{parindent}{hole_shape}, <{path["begin"]:.6f}, {path["end"]:.6f}, 0.0>, {profile["hollow"]:.6f}, <{path["twist_begin"]:.6f}, {path["twist"]:.6f}, 0.0>,\n"
 
     match prim_type:
         case "PRIM_TYPE_SPHERE":
@@ -122,6 +134,9 @@ def create_prim_shape_lsl(prim_volume_data, prim_scale, subindent, link_referenc
         case "PRIM_TYPE_TORUS" | "PRIM_TYPE_TUBE" | "PRIM_TYPE_RING":
             # vector hole_size, vector top_shear, vector advanced_cut, vector taper, float revolutions, float radius_offset, float skew
             lsl_text += f"{parindent}<{path["scale_x"]:.6f}, {path["scale_y"]:.6f}, 0.0>, <{path["shear_x"]:.6f}, {path["shear_y"]:.6f}, 0.0>, <{profile["begin"]:.6f}, {profile["end"]:.6f}, 0.0>, <{path["taper_x"]:.6f}, {path["taper_y"]:.6f}, 0.0>, {path["revolutions"]:.6f}, {path["radius_offset"]:.6f}, {path["skew"]:.6f}\n"
+        case "PRIM_TYPE_SCULPT":
+            # string map, integer type
+            lsl_text += f"{parindent}\"{lsl_escape(sculpt_texture_uuid)}\", {sculpt_type}\n"
 
     lsl_text += subindent + "]);\n"
     return lsl_text
@@ -155,23 +170,26 @@ def create_object_properties_lsl(obj, subindent, is_linked = True):
 
     if "sl_physics" in obj:
         physics_data = json.loads(obj["sl_physics"])
-        params.append(f"\n{parindent}PRIM_MATERIAL, {physics_data["material_type"]}")
+        if "material_type" in physics_data:
+            params.append(f"\n{parindent}PRIM_MATERIAL, {physics_data["material_type"]}")
 
         # set material params if parent prim
-        physics_material_lsl = f"llSetPhysicsMaterial(GRAVITY_MULTIPLIER | RESTITUTION | FRICTION | DENSITY, {physics_data["gravity"]:.3f}, {physics_data["bounciness"]:.3f}, {physics_data["friction"]:.3f}, {physics_data["density"]:.3f});"
-        if is_linked:
-            # if root prim (offset, because it is 0 if not in linkset, otherwise 1)
-            lsl_text += f"{subindent}if (link_num == offset)\n{subindent}{{\n{parindent}{physics_material_lsl}\n{subindent}}}\n"
-        else:
-            lsl_text += f"{subindent}{physics_material_lsl}\n"
+        if "gravity" in physics_data:
+            physics_material_lsl = f"llSetPhysicsMaterial(GRAVITY_MULTIPLIER | RESTITUTION | FRICTION | DENSITY, {physics_data["gravity"]:.3f}, {physics_data["bounciness"]:.3f}, {physics_data["friction"]:.3f}, {physics_data["density"]:.3f});"
+            if is_linked:
+                # if root prim (offset, because it is 0 if not in linkset, otherwise 1)
+                lsl_text += f"{subindent}if (link_num == offset)\n{subindent}{{\n{parindent}{physics_material_lsl}\n{subindent}}}\n"
+            else:
+                lsl_text += f"{subindent}{physics_material_lsl}\n"
 
         # cant set physics shape NONE on parent prim
-        physics_shape = physics_data.get("shape", 2)
-        if physics_shape != 1:
-            params.append(f"\n{parindent}PRIM_PHYSICS_SHAPE_TYPE, {physics_shape}")
-        elif is_linked:
-            # else means if not root prim
-            lsl_text += f"{subindent}else\n{subindent}{{\n{parindent}llSetLinkPrimitiveParamsFast(link_num, [PRIM_PHYSICS_SHAPE_TYPE, {physics_shape}]);\n{subindent}}}\n"
+        physics_shape = physics_data.get("shape")
+        if physics_shape is not None:
+            if physics_shape != 1:
+                params.append(f"\n{parindent}PRIM_PHYSICS_SHAPE_TYPE, {physics_shape}")
+            elif is_linked:
+                # if not root prim (offset, because it is 0 if not in linkset, otherwise 1)
+                lsl_text += f"{subindent}if (link_num != offset)\n{subindent}{{\n{parindent}llSetLinkPrimitiveParamsFast(link_num, [PRIM_PHYSICS_SHAPE_TYPE, {physics_shape}]);\n{subindent}}}\n"
 
     if "sl_description" in obj:
         params.append(f"\n{parindent}PRIM_DESC, \"{lsl_escape(obj["sl_description"])}\"")
@@ -233,7 +251,7 @@ def create_object_properties_lsl(obj, subindent, is_linked = True):
             params.append(f"\n{parindent}PRIM_GLOW, {i}, {material["sl_glow"]:.3f}")
 
         # tint color and alpha
-        tint_color = "WHITE"
+        tint_color = "<1.0, 1.0, 1.0>"
         alpha = 1.0
 
         # alpha modes
@@ -254,7 +272,9 @@ def create_object_properties_lsl(obj, subindent, is_linked = True):
                 alpha_cutoff = from_node.inputs[1].default_value
         else:
             alpha = principled.inputs["Alpha"].default_value
-        params.append(f"\n{parindent}PRIM_ALPHA_MODE, {i}, {alpha_mode}, {round(alpha_cutoff * 255)}")
+
+        if alpha_mode != "PRIM_ALPHA_MODE_BLEND" or alpha_cutoff:
+            params.append(f"\n{parindent}PRIM_ALPHA_MODE, {i}, {alpha_mode}, {round(alpha_cutoff * 255)}")
 
         # base color
         base_color_input = principled.inputs["Base Color"]
@@ -278,14 +298,15 @@ def create_object_properties_lsl(obj, subindent, is_linked = True):
                     # pbr if overridden
                     if "pbrMetallicRoughness" in pbr_overrides:
                         # [ string texture, vector repeats, vector offsets, float rotation_in_radians, vector color, float alpha, integer gltf_alpha_mode, float alpha_mask_cutoff, integer double_sided ]
-                        params.append(f"\n{parindent}PRIM_GLTF_BASE_COLOR, {i}, \"{lsl_escape(image["sl_uuid"])}\", <{texture_ss}, {texture_st}, 1.0>, <{texture_os}, {texture_ot}, 0.0>, {texture_rot}, {tint_color}, {alpha:.2f}, {alpha_mode}, {alpha_cutoff:.2f}, EMPTY_STRING")
+                        params.append(f"\n{parindent}PRIM_GLTF_BASE_COLOR, {i}, \"{lsl_escape(image["sl_uuid"])}\", <{texture_ss}, {texture_st}, 1.0>, <{texture_os}, {texture_ot}, 0.0>, {texture_rot}, {tint_color}, {alpha:.2f}, {alpha_mode}, {alpha_cutoff:.2f}, \"\"")
         else:
             tint_color = principled.inputs["Base Color"].default_value
             tint_color = f"<{tint_color[0]:.3f}, {tint_color[1]:.3f}, {tint_color[2]:.3f}>"
             if "pbrMetallicRoughness" in pbr_overrides:
-                params.append(f"\n{parindent}PRIM_GLTF_BASE_COLOR, {i}, \"\", \"\", \"\", \"\", {tint_color}, {alpha:.2f}, {alpha_mode}, {alpha_cutoff:.2f}, EMPTY_STRING")
+                params.append(f"\n{parindent}PRIM_GLTF_BASE_COLOR, {i}, \"\", \"\", \"\", \"\", {tint_color}, {alpha:.2f}, {alpha_mode}, {alpha_cutoff:.2f}, \"\"")
 
-        params.append(f"\n{parindent}PRIM_COLOR, {i}, {tint_color}, {alpha:.2f}")
+        if tint_color != "<1.0, 1.0, 1.0>" or abs(alpha - 1.0) >= 0.0001:
+            params.append(f"\n{parindent}PRIM_COLOR, {i}, {tint_color}, {alpha:.2f}")
 
         # normal map
         normal_input = principled.inputs["Normal"]
@@ -426,10 +447,7 @@ def create_lsl_script():
     if not bpy.data.objects:
         return "default\n{\n    \\\\ No Objects Available\n}", objects_tree
 
-    lsl_text = """vector WHITE = <1.0, 1.0, 1.0>;
-string EMPTY_STRING = "";
-
-default
+    lsl_text = """default
 {
     state_entry()
     {

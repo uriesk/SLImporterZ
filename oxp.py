@@ -778,16 +778,27 @@ class OXPParser():
             # { color: list<4>, falloff, radius, texture_uuid, fov, focus, ambiance }
             custom_properties["sl_light"] = json.dumps(light_data)
         if "ExtraPhysics" in prim_data:
-            physics_data = prim_data["ExtraPhysics"]
-            custom_properties["sl_physics"] = json.dumps({
+            physics_prim_data = prim_data["ExtraPhysics"]
+            physics_data = {
                 # 0: PRIM, 1: NONE, 2: CONVEX
-                "shape": physics_data.get("PhysicsShapeType", 2),
-                "gravity": physics_data.get("GravityMultiplier", 1.0),
-                "friction": physics_data.get("Friction", 0.6),
-                "density": physics_data.get("Density", 1000.0),
-                "bounciness": physics_data.get("Restitution", 0.5),
-                "material_type": prim_data.get("material", 3)
-            })
+                "shape": physics_prim_data.get("PhysicsShapeType", 2),
+            }
+            physics_gravity = physics_prim_data.get("GravityMultiplier", 1.0)
+            physics_friction = physics_prim_data.get("Friction", 0.6)
+            physics_density = physics_prim_data.get("Density", 1000.0)
+            physics_bounciness = physics_prim_data.get("Restitution", 0.5)
+            physics_material_type = physics_prim_data.get("material", 3)
+
+            # don't include if defaults
+            if physics_material_type != 3:
+                physics_data["material_type"] = physics_material_type
+            if abs(physics_gravity - 1.0) >= 0.0001 or abs(physics_friction - 0.6) >= 0.0001 or abs(physics_density - 1000.0) >= 0.0001 or abs(physics_bounciness - 0.5) >= 0.0001:
+                physics_data["gravity"] = physics_gravity
+                physics_data["friction"] = physics_friction
+                physics_data["density"] = physics_density
+                physics_data["bounciness"] = physics_bounciness
+
+            custom_properties["sl_physics"] = json.dumps(physics_data)
 
         return custom_properties
 
@@ -812,15 +823,12 @@ class OXPParser():
             for i, material in enumerate(materials):
                 fake_obj["material_slots"].append({ "material": material })
 
-            lsl_text = """vector WHITE = <1.0, 1.0, 1.0>;
-string EMPTY_STRING = "";
-
-default
+            lsl_text = """default
 {
     state_entry()
     {\n"""
             subindent = "        "
-            shape_lsl_text = lsl.create_prim_shape_lsl(prim_data.get("volume"), prim_data.get("scale"), subindent)
+            shape_lsl_text = lsl.create_prim_shape_lsl(prim_data, subindent)
             object_lsl_text, _ = lsl.create_object_properties_lsl(fake_obj, subindent, False)
             lsl_text += shape_lsl_text + object_lsl_text + subindent + "llRemoveInventory(llGetScriptName());\n    }\n}"
 
