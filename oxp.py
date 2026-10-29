@@ -815,7 +815,7 @@ class OXPParser():
 
             name = prim_data.get("name")
             if not name:
-                name = mesh_uuid
+                name = prim_uuid
             # create a fake object that lsl creation can take
             fake_obj = self._get_custom_sl_properties(prim_data)
             materials = self._create_materials_for_prim(prim_data, name)
@@ -832,10 +832,14 @@ class OXPParser():
             object_lsl_text, _ = lsl.create_object_properties_lsl(fake_obj, subindent, False)
             lsl_text += shape_lsl_text + object_lsl_text + subindent + "llRemoveInventory(llGetScriptName());\n    }\n}"
 
-            text_block_name = "LSL Prim Params " + name
-            text_block = bpy.data.texts.get(text_block_name)
-            if text_block is None:
-                text_block = bpy.data.texts.new(text_block_name)
+            text_block = None
+            for t in list(bpy.data.texts):
+                if t.get("sl_uuid") == prim_uuid:
+                    text_block = t
+                    break
+            if not text_block:
+                text_block = bpy.data.texts.new("LSL Prim " + name)
+                text_block["sl_uuid"] = prim_uuid
             text_block.clear()
             text_block.write(lsl_text)
             text_block.cursor_set(0)

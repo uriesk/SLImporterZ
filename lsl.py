@@ -159,7 +159,10 @@ def create_object_properties_lsl(obj, subindent, is_linked = True):
             elif isinstance(value, float):
                 value = f"{value:.8f}"
             elif isinstance(value, str):
-                value = f"\"{lsl_escape(value)}\""
+                if utils.is_sl_uuid(value):
+                    value = f"(key)\"{lsl_escape(value)}\""
+                else:
+                    value = f"\"{lsl_escape(value)}\""
             else:
                 value = str(value)
             particle_params.append(f"\n{parindent}{key}, {value}")

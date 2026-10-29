@@ -18,6 +18,15 @@
 
 import json
 import hashlib
+import re
+
+_SL_UUID_RE = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+    re.IGNORECASE,
+)
+
+def is_sl_uuid(s):
+    return isinstance(s, str) and bool(_SL_UUID_RE.match(s))
 
 def merge_dicts(dict1, dict2):
     # merge two dicts together
