@@ -194,6 +194,15 @@ def create_object_properties_lsl(obj, subindent, is_linked = True):
                 # if not root prim (offset, because it is 0 if not in linkset, otherwise 1)
                 lsl_text += f"{subindent}if (link_num != offset)\n{subindent}{{\n{parindent}llSetLinkPrimitiveParamsFast(link_num, [PRIM_PHYSICS_SHAPE_TYPE, {physics_shape}]);\n{subindent}}}\n"
 
+    if "sl_texture_anim" in obj:
+        texture_anim_data = json.loads(obj["sl_texture_anim"])
+        # integer mode, integer side, integer x_frames, integer y_frames, float start, float length, float rate
+        texture_anim_arguments = f"{texture_anim_data.get("mode", 0)}, {texture_anim_data.get("face", "ALL_SIDES")}, {texture_anim_data.get("sizeX", 1)}, {texture_anim_data.get("sizeY", 1)}, {texture_anim_data.get("start", 0.0):.6f}, {texture_anim_data.get("length", 0.0):.6f}, {texture_anim_data.get("rate", 25.0):.6f}"
+        if is_linked:
+            lsl_text += f"{subindent}llSetLinkTextureAnim({texture_anim_arguments});\n"
+        else:
+            lsl_text += f"{subindent}llSetTextureAnim({texture_anim_arguments});\n"
+
     if "sl_description" in obj:
         params.append(f"\n{parindent}PRIM_DESC, \"{lsl_escape(obj["sl_description"])}\"")
 

@@ -759,6 +759,9 @@ class OXPParser():
                     particle_data["PSYS_PART_END_ALPHA"] = end_color[3]
             if particle_data:
                 custom_properties["sl_particles"] = json.dumps(particle_data)
+        # texture animations
+        if "texture_anim" in prim_data:
+            custom_properties["sl_texture_anim"] = json.dumps(prim_data["texture_anim"])
         # prim data that we cant interpret otherwise
         if "light" in prim_data:
             light_data = prim_data["light"].copy()
