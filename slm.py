@@ -447,7 +447,6 @@ def import_slm(stream, name, **kwargs):
     bind_shape_matrix = None
     joint_names = None
     bones = None
-    old_bone_matrices = {}
     if "skin" in slm_metadata:
         skin_offset = start_pos + header_size + slm_metadata["skin"]["offset"]
         skin_size = slm_metadata["skin"]["size"]
@@ -486,10 +485,7 @@ def import_slm(stream, name, **kwargs):
         if "inverse_bind_matrix" in skin_data:
             # corret inverse bind matrices according to standard skeleton
             bind_matrix_transforms = skeleton.get_bind_matrix_transform()
-
             inverse_bind_matrices = []
-
-            #bpy.ops.object.mode_set(mode='EDIT')
 
             for i, inverse_bind_matrix in enumerate(skin_data["inverse_bind_matrix"]):
                 inverse_bind_matrix = matrix_from_array(inverse_bind_matrix)
@@ -501,25 +497,13 @@ def import_slm(stream, name, **kwargs):
                 bind_matrix_transform = bind_matrix_transforms[joint_names[i]]
 
                 bind_matrix = bind_matrix @ bind_matrix_transform
-    
+
                 if joint_names[i] in skeleton.VOLBONES:
                     print("scale change " + joint_names[i], bind_matrix.to_scale())
                     print(f"Rotation:\n{tuple(math.degrees(a) for a in bind_matrix.to_euler())}")
 
-                #---------------------------------------------------------------
-                # Moving armature instead of skinning mesh, requires EDIT mode
-                #armature_bone = armature.data.edit_bones[joint_names[i]]
-                #sx, sy, sz = bind_matrix.to_scale()
-                #scale_matrix = Matrix.Diagonal((sx, sy, sz, 1.0))
-                #old_bone_matrices[joint_names[i]] = armature_bone.matrix.copy() @ scale_matrix.inverted()
-                #armature_bone.matrix = bind_matrix
-                #---------------------------------------------------------------
-
                 inverse_bind_matrix = bind_matrix.inverted()
                 inverse_bind_matrices.append(inverse_bind_matrix)
-
-            #bpy.ops.object.mode_set(mode='OBJECT')
-
 
         if "alt_inverse_bind_matrix" in skin_data:
             # optional, if joint offsets are used then the alternate bind matrix
@@ -579,10 +563,6 @@ def import_slm(stream, name, **kwargs):
                     mod = mesh_object.modifiers.new(name="Armature", type='ARMATURE')
                     mod.object = armature
                     mod.use_vertex_groups = True
-
-    # TODO move armature back
-    #if imported_mesh_objects and False:
-    #    skeleton.set_pose_matrices(armature, imported_mesh_objects, old_bone_matrices)
 
     return imported_mesh_objects
 
