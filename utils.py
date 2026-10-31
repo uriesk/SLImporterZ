@@ -55,7 +55,7 @@ def print_tree(data, indent="", prefix="", is_last=True):
 
             connector = "└── " if is_last_key else "├── "
             lines.append(f"{indent}{connector}{key}: {type(value).__name__}")
-            
+
             new_indent = indent + ("    " if is_last_key else "│   ")
             lines.extend(print_tree(value, new_indent, prefix + str(key), is_last_key))
 
@@ -100,5 +100,5 @@ def print_tree(data, indent="", prefix="", is_last=True):
 
     else:
         lines.append(f"{indent}    └── {type(data).__name__}: {repr(data)[:50]}")
-    
+
     return lines

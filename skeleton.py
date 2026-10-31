@@ -78,7 +78,7 @@ def get_skeleton(use_pivot=False):
 
 def add_skeleton(context):
     bones = get_skeleton()
-    
+
     armature = bpy.data.armatures.new(name="Armature")
     armature_obj = bpy.data.objects.new("Armature", armature)
     context.collection.objects.link(armature_obj)
@@ -96,7 +96,7 @@ def add_skeleton(context):
         b.use_deform = False
         if bone["parent"]:
             b.parent = boners[bone["parent"]]
-        
+
         if bone["connected"]:
             b.use_connect = True
 
@@ -111,10 +111,13 @@ def add_skeleton(context):
         collection.assign(pose.bones[bone_name])
 
     # TODO apply rotation to this skeleton, yes or no?
-    bpy.ops.object.mode_set(mode='EDIT', toggle=False)
-    for bone_name, bone in bones.items():
-        edit_bones[bone_name].matrix = edit_bones[bone_name].matrix @ bone["rot"]
-    bpy.ops.object.mode_set(mode='EDIT', toggle=True)
+    # if we apply the boner_rotation_matrix to bind_matrix_transform, it doesn't
+    # really matter
+    if True:
+        bpy.ops.object.mode_set(mode='EDIT', toggle=False)
+        for bone_name, bone in bones.items():
+            edit_bones[bone_name].matrix = edit_bones[bone_name].matrix @ bone["rot"]
+        bpy.ops.object.mode_set(mode='EDIT', toggle=True)
 
     # inverse_bind_matrix from SL data includes absolute translation, but
     # already transformed relative rotation and scale.
@@ -123,16 +126,20 @@ def add_skeleton(context):
     for bone_name in boners.keys():
         boner_matrix = armature.bones[bone_name].matrix_local
 
-        rot = bones[bone_name]["rot"].to_euler('XYZ')
-        if rot.x != 0.0 or rot.y != 0.0 or rot.z != 0.0:
-            print("ROT DEFINED: " + bone_name, [math.degrees(a) for a in rot])
-
         # rotation from bones created in blender
         boner_rotation_matrix = boner_matrix.to_quaternion().to_matrix().to_4x4()
-        # inverted scale from avatar_skeleton.xml
-        #bind_matrix_transform = bones[bone_name]["scale"].inverted() @ bones[bone_name]["rot"].inverted() @ boner_rotation_matrix
-        bind_matrix_transform = bones[bone_name]["scale"].inverted() @ boner_rotation_matrix
-        #bind_matrix_transform = boner_rotation_matrix
+
+        rot = bones[bone_name]["rot"].to_euler('XYZ')
+        if rot.x != 0.0 or rot.y != 0.0 or rot.z != 0.0:
+            boner_rot = boner_rotation_matrix.to_euler('XYZ')
+            print("ROT DEFINED: " + bone_name, [math.degrees(a) for a in rot])
+            print("ROT BONER: " + bone_name, [math.degrees(a) for a in boner_rot])
+
+        bind_matrix_transform = (
+            bones[bone_name]["scale"].inverted()
+            @ bones[bone_name]["rot"].inverted()
+            @ boner_rotation_matrix
+        )
 
         json_data[bone_name] = [list(row) for row in bind_matrix_transform]
     json_path = os.path.join(os.path.dirname(os.path.realpath(__file__)), "assets", "bind_matrix_transform.json")
@@ -218,12 +225,30 @@ def set_pose_matrices(armature, mesh_objects, matrix_map):
         mod.use_vertex_groups = True
 
 
-def get_bind_matrix_transform():
+def get_bind_matrix_transforms():
     path = os.path.join(os.path.dirname(os.path.realpath(__file__)), "assets", "bind_matrix_transform.json")
     with open(path, "r") as f:
         data = json.load(f)
     for bone_name, bind_matrix_transform in data.items():
         data[bone_name] = Matrix(bind_matrix_transform)
+    return data
+
+def store_calibration_matrices(calibration_matrices):
+    json_data = {}
+    for bone_name, calibration_matrix in calibration_matrices.items():
+        json_data[bone_name] = [list(row) for row in calibration_matrix]
+    json_path = os.path.join(os.path.dirname(os.path.realpath(__file__)), "assets", "calibration_matrices.json")
+    with open(json_path, "w") as f:
+        json.dump(json_data, f, indent=2)
+
+def get_calibration_matrices():
+    path = os.path.join(os.path.dirname(os.path.realpath(__file__)), "assets", "calibration_matrices.json")
+    if not os.path.exists(path):
+        return {}
+    with open(path, "r") as f:
+        data = json.load(f)
+    for bone_name, calibration_matrices in data.items():
+        data[bone_name] = Matrix(calibration_matrices)
     return data
 
 class SLIZ_ADD_armature(bpy.types.Operator):

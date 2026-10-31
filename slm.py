@@ -416,6 +416,7 @@ def import_slm(stream, name, **kwargs):
     filepath = kwargs.get("filepath")
     create_debug_info = kwargs.get("create_debug_info", False)
     extract_lods = kwargs.get("extract_lods", False)
+    do_calibration = kwargs.get("calibrate", False)
 
     # create stream if its not one, stream needs to be seekable
     if isinstance(stream, bytes):
@@ -478,33 +479,55 @@ def import_slm(stream, name, **kwargs):
 
             bones = []
             for i, joint_name in enumerate(joint_names):
-                print("bone " + joint_name)
                 bone = armature.data.bones[joint_name]
                 bone.use_deform = True
                 bones.append(bone)
         if "inverse_bind_matrix" in skin_data:
             # corret inverse bind matrices according to standard skeleton
-            bind_matrix_transforms = skeleton.get_bind_matrix_transform()
+            bind_matrix_transforms = skeleton.get_bind_matrix_transforms()
+            calibration_matrices = skeleton.get_calibration_matrices()
             inverse_bind_matrices = []
 
+            debug_text = f"bind shape matrix:\n{str(bind_shape_matrix)}\n\n"
+
             for i, inverse_bind_matrix in enumerate(skin_data["inverse_bind_matrix"]):
+                joint_name = joint_names[i]
                 inverse_bind_matrix = matrix_from_array(inverse_bind_matrix)
 
-                if "alt_inverse_bind_matrix" in skin_data:
-                    inverse_bind_matrix = matrix_from_array(skin_data["alt_inverse_bind_matrix"][i])
+                # NOTE: not implemented yet, ignore alt_inverse_bind_matrix, we
+                # only test meshes that do not have this currently
+                # if "alt_inverse_bind_matrix" in skin_data:
+                #     inverse_bind_matrix = matrix_from_array(skin_data["alt_inverse_bind_matrix"][i])
 
-                bind_matrix = inverse_bind_matrix.inverted()
-                bind_matrix_transform = bind_matrix_transforms[joint_names[i]]
+                bind_matrix_transform = bind_matrix_transforms[joint_name]
 
-                bind_matrix = bind_matrix @ bind_matrix_transform
+                if do_calibration:
+                    calibration_matrix = inverse_bind_matrix @ bones[i].matrix_local @ bind_matrix_transform.inverted()
+                    calibration_matrices[joint_name] = calibration_matrix
+                    inverse_bind_matrix = bones[i].matrix_local.inverted()
+                else:
+                    calibration_matrix = calibration_matrices[joint_name] if joint_name in calibration_matrices else Matrix()
+                    calibration_matrix = Matrix()
+                    bind_matrix = inverse_bind_matrix.inverted()
 
-                if joint_names[i] in skeleton.VOLBONES:
-                    print("scale change " + joint_names[i], bind_matrix.to_scale())
-                    print(f"Rotation:\n{tuple(math.degrees(a) for a in bind_matrix.to_euler())}")
+                    debug_matrix = bind_matrix
+                    translation, rotation, scale = debug_matrix.decompose()
+                    debug_text += joint_name + "\n" + str(debug_matrix) + f"\nTranslation:    {translation}\nRotation:    {tuple(math.degrees(a) for a in rotation.to_euler())}\nScale:    {scale}\n\n"
 
-                inverse_bind_matrix = bind_matrix.inverted()
+                    bind_matrix = bind_matrix @ calibration_matrix @ bind_matrix_transform
+                    inverse_bind_matrix = bind_matrix.inverted()
+
                 inverse_bind_matrices.append(inverse_bind_matrix)
 
+            ibm_filepath = os.path.splitext(filepath)[0] + "_ibm" + ".txt"
+            with open(ibm_filepath, 'w', encoding='utf-8') as f:
+                f.write(debug_text)
+
+            if do_calibration:
+                skeleton.store_calibration_matrices(calibration_matrices)
+
+        # NOTE: not implemented yet, ignore alt_inverse_bind_matrix, we only
+        # test meshes that do not have this currently
         if "alt_inverse_bind_matrix" in skin_data:
             # optional, if joint offsets are used then the alternate bind matrix
             # will contain translational information that will override the
@@ -515,10 +538,21 @@ def import_slm(stream, name, **kwargs):
                 print(joint_name)
                 print(matrix_from_array(skin_data["alt_inverse_bind_matrix"][i]))
                 print(matrix_from_array(skin_data["inverse_bind_matrix"][i]))
+        # NOTE: not implemented yet, ignore pelvis_offset, we only test meshes
+        # that do not have this currently
         if "pelvis_offset" in skin_data:
             # optional, used to provide a pelvis fixup for avatar rigs that
             # alter the default Second Life skeleton
             print("pelvis_offset" + str(skin_data["pelvis_offset"]))
+
+        print("bind_shape_matrix")
+        print(bind_shape_matrix)
+        for joint_idx, joint_name in enumerate(joint_names):
+            inverse_bind_matrix = inverse_bind_matrices[joint_idx]
+            bone_matrix = bones[joint_idx].matrix_local
+            joint_matrix =  bone_matrix @ inverse_bind_matrix
+            print("skin joint matrix " + joint_name)
+            print(joint_matrix)
 
     for lod_name, type_name in (("high_lod", None), ("medium_lod", "LOD2"), ("low_lod", "LOD1"), ("lowest_lod", "LOD0"), ("physics_mesh", "PHYS")):
 
