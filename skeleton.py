@@ -232,21 +232,3 @@ def get_bind_matrix_transforms():
     for bone_name, bind_matrix_transform in data.items():
         data[bone_name] = Matrix(bind_matrix_transform)
     return data
-
-def store_calibration_matrices(calibration_matrices):
-    json_data = {}
-    for bone_name, calibration_matrix in calibration_matrices.items():
-        json_data[bone_name] = [list(row) for row in calibration_matrix]
-    json_path = os.path.join(os.path.dirname(os.path.realpath(__file__)), "assets", "calibration_matrices.json")
-    with open(json_path, "w") as f:
-        json.dump(json_data, f, indent=2)
-
-def get_calibration_matrices():
-    path = os.path.join(os.path.dirname(os.path.realpath(__file__)), "assets", "calibration_matrices.json")
-    if not os.path.exists(path):
-        return {}
-    with open(path, "r") as f:
-        data = json.load(f)
-    for bone_name, calibration_matrices in data.items():
-        data[bone_name] = Matrix(calibration_matrices)
-    return data

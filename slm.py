@@ -414,7 +414,6 @@ def import_slm(stream, name, **kwargs):
     filepath = kwargs.get("filepath")
     create_debug_info = kwargs.get("create_debug_info", False)
     extract_lods = kwargs.get("extract_lods", False)
-    do_calibration = kwargs.get("calibrate", False)
 
     # create stream if its not one, stream needs to be seekable
     if isinstance(stream, bytes):
@@ -483,7 +482,6 @@ def import_slm(stream, name, **kwargs):
         if "inverse_bind_matrix" in skin_data:
             # corret inverse bind matrices according to standard skeleton
             bind_matrix_transforms = skeleton.get_bind_matrix_transforms()
-            calibration_matrices = skeleton.get_calibration_matrices()
             inverse_bind_matrices = []
 
             debug_text = f"bind shape matrix:\n{str(bind_shape_matrix)}\n\n"
@@ -498,31 +496,20 @@ def import_slm(stream, name, **kwargs):
                 #     inverse_bind_matrix = matrix_from_array(skin_data["alt_inverse_bind_matrix"][i])
 
                 bind_matrix_transform = bind_matrix_transforms[joint_name]
+                bind_matrix = inverse_bind_matrix.inverted()
 
-                if do_calibration:
-                    calibration_matrix = inverse_bind_matrix @ bones[i].matrix_local @ bind_matrix_transform.inverted()
-                    calibration_matrices[joint_name] = calibration_matrix
-                    inverse_bind_matrix = bones[i].matrix_local.inverted()
-                else:
-                    calibration_matrix = calibration_matrices[joint_name] if joint_name in calibration_matrices else Matrix()
-                    calibration_matrix = Matrix()
-                    bind_matrix = inverse_bind_matrix.inverted()
+                debug_matrix = bind_matrix
+                translation, rotation, scale = debug_matrix.decompose()
+                debug_text += joint_name + "\n" + str(debug_matrix) + f"\nTranslation:    {translation}\nRotation:    {tuple(math.degrees(a) for a in rotation.to_euler())}\nScale:    {scale}\n\n"
 
-                    debug_matrix = bind_matrix
-                    translation, rotation, scale = debug_matrix.decompose()
-                    debug_text += joint_name + "\n" + str(debug_matrix) + f"\nTranslation:    {translation}\nRotation:    {tuple(math.degrees(a) for a in rotation.to_euler())}\nScale:    {scale}\n\n"
-
-                    bind_matrix = bind_matrix @ calibration_matrix @ bind_matrix_transform
-                    inverse_bind_matrix = bind_matrix.inverted()
+                bind_matrix = bind_matrix @ bind_matrix_transform
+                inverse_bind_matrix = bind_matrix.inverted()
 
                 inverse_bind_matrices.append(inverse_bind_matrix)
 
             ibm_filepath = os.path.splitext(filepath)[0] + "_ibm" + ".txt"
             with open(ibm_filepath, 'w', encoding='utf-8') as f:
                 f.write(debug_text)
-
-            if do_calibration:
-                skeleton.store_calibration_matrices(calibration_matrices)
 
         # NOTE: not implemented yet, ignore alt_inverse_bind_matrix, we only
         # test meshes that do not have this currently
