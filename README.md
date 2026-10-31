@@ -6,9 +6,6 @@ Development in progress.
 
 ## Features
 
-- Import default skeleton directly in the Object View `Add` menu
-
-![Import Skeleton](./images/import-skeleton.webp)
 
 - Import SLM meshes (viewer cache format)
 
@@ -24,6 +21,10 @@ Development in progress.
 in the Scripting Text Editor within Blender
 
 ![LSL Generation Buttons](./images/lsl-generation.webp)
+
+- Set an existing Armatures Pose Position to the default SL T-Pose
+
+![Set to T-Pose](./images/apply_t_pose.webp)
 
 ## References
 

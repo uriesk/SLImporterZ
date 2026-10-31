@@ -36,6 +36,18 @@ class SLIZ_ADD_armature(bpy.types.Operator):
         self.report({'INFO'}, "Second Life compatible armature added")
         return {'FINISHED'}
 
+class SLIZ_OT_set_t_pose(bpy.types.Operator):
+    bl_idname = "object.sliz_set_t_pose"
+    bl_label = "Apply SL T-Pose as Pose"
+    bl_description = "Reset the selected armature's pose to the default T-pose defined by the Second Life skeleton"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        armature = context.active_object
+        skeleton.set_t_pose(armature)
+        self.report({'INFO'}, "Armature pose set to T-pose")
+        return {'FINISHED'}
+
 def menu_func_add(self, context):
     self.layout.separator()
     self.layout.operator(
@@ -44,13 +56,25 @@ def menu_func_add(self, context):
         icon='ARMATURE_DATA'
     )
 
+def menu_func_pose(self, context):
+    self.layout.separator()
+    self.layout.operator(
+        SLIZ_OT_set_t_pose.bl_idname,
+        text="Apply SL T-Pose as Pose",
+    )
+
 def register():
     bpy.utils.register_class(SLIZ_ADD_armature)
+    bpy.utils.register_class(SLIZ_OT_set_t_pose)
     bpy.types.VIEW3D_MT_add.append(menu_func_add)
+    bpy.types.VIEW3D_MT_pose_apply.append(menu_func_pose)
 
 def unregister():
+    bpy.types.VIEW3D_MT_pose_apply.remove(menu_func_pose)
     bpy.types.VIEW3D_MT_add.remove(menu_func_add)
+    bpy.utils.unregister_class(SLIZ_OT_set_t_pose)
     bpy.utils.unregister_class(SLIZ_ADD_armature)
+
 
 if __name__ == "__main__":
     register()

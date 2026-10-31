@@ -24,6 +24,8 @@ from mathutils import Vector, Matrix, Euler
 import json
 
 VOLBONES = ["UPPER_BACK", "LOWER_BACK", "LEFT_PEC", "RIGHT_PEC", "LEFT_HANDLE", "RIGHT_HANDLE", "BUTT"]
+TRANSFORM_FILE = "bind_matrix_transform.json"
+BIND_FILE = "bind_matrices.json"
 
 
 def get_skeleton(use_pivot=False):
@@ -76,7 +78,7 @@ def get_skeleton(use_pivot=False):
         return result
     return getRecursive(root[0])
 
-def add_skeleton(context):
+def add_skeleton(context, write_json=True):
     bones = get_skeleton()
 
     armature = bpy.data.armatures.new(name="Armature")
@@ -110,53 +112,65 @@ def add_skeleton(context):
             collection = armature.collections.new(name=bone["group"])
         collection.assign(pose.bones[bone_name])
 
-    # TODO apply rotation to this skeleton, yes or no?
-    # if we apply the boner_rotation_matrix to bind_matrix_transform, it doesn't
-    # really matter
-    if True:
-        bpy.ops.object.mode_set(mode='EDIT', toggle=False)
-        for bone_name, bone in bones.items():
-            edit_bones[bone_name].matrix = edit_bones[bone_name].matrix @ bone["rot"]
-        bpy.ops.object.mode_set(mode='EDIT', toggle=True)
+    bpy.ops.object.mode_set(mode='EDIT', toggle=False)
+    for bone_name, bone in bones.items():
+        edit_bones[bone_name].matrix = edit_bones[bone_name].matrix @ bone["rot"]
+    bpy.ops.object.mode_set(mode='EDIT', toggle=True)
 
-    # inverse_bind_matrix from SL data includes absolute translation, but
-    # already transformed relative rotation and scale.
-    # bind_matrix_transform can be used to add it
-    json_data = {}
-    for bone_name in boners.keys():
-        boner_matrix = armature.bones[bone_name].matrix_local
+    if write_json:
+        # inverse_bind_matrix from SL data includes absolute translation, but
+        # already transformed relative rotation and scale.
+        # bind_matrix_transform can be used to add it
+        transform_json_data = {}
+        bind_json_data = {}
+        for bone_name in boners.keys():
+            boner_matrix = armature.bones[bone_name].matrix_local
+            # rotation from bones created in blender
+            boner_rotation_matrix = boner_matrix.to_quaternion().to_matrix().to_4x4()
 
-        # rotation from bones created in blender
-        boner_rotation_matrix = boner_matrix.to_quaternion().to_matrix().to_4x4()
+            bind_matrix_transform = (
+                bones[bone_name]["scale"].inverted()
+                @ bones[bone_name]["rot"].inverted()
+                @ boner_rotation_matrix
+            )
 
-        rot = bones[bone_name]["rot"].to_euler('XYZ')
-        if rot.x != 0.0 or rot.y != 0.0 or rot.z != 0.0:
-            boner_rot = boner_rotation_matrix.to_euler('XYZ')
-            print("ROT DEFINED: " + bone_name, [math.degrees(a) for a in rot])
-            print("ROT BONER: " + bone_name, [math.degrees(a) for a in boner_rot])
+            transform_json_data[bone_name] = [list(row) for row in bind_matrix_transform]
+            bind_json_data[bone_name] = [list(row) for row in boner_matrix]
 
-        bind_matrix_transform = (
-            bones[bone_name]["scale"].inverted()
-            @ bones[bone_name]["rot"].inverted()
-            @ boner_rotation_matrix
-        )
+        json_path = os.path.join(os.path.dirname(os.path.realpath(__file__)), "assets", TRANSFORM_FILE)
+        with open(json_path, "w") as f:
+            json.dump(transform_json_data, f, indent=2)
 
-        json_data[bone_name] = [list(row) for row in bind_matrix_transform]
-    json_path = os.path.join(os.path.dirname(os.path.realpath(__file__)), "assets", "bind_matrix_transform.json")
-    with open(json_path, "w") as f:
-        json.dump(json_data, f, indent=2)
+        json_path = os.path.join(os.path.dirname(os.path.realpath(__file__)), "assets", BIND_FILE)
+        with open(json_path, "w") as f:
+            json.dump(bind_json_data, f, indent=2)
 
     armature_obj.location = (0,0,0)
     return armature_obj
 
+def get_bind_matrix_transforms():
+    path = os.path.join(os.path.dirname(os.path.realpath(__file__)), "assets", TRANSFORM_FILE)
+    with open(path, "r") as f:
+        data = json.load(f)
+    for bone_name, bind_matrix_transform in data.items():
+        data[bone_name] = Matrix(bind_matrix_transform)
+    return data
 
-def set_pose_matrices(armature, mesh_objects, matrix_map):
+def get_bind_matrices():
+    path = os.path.join(os.path.dirname(os.path.realpath(__file__)), "assets", BIND_FILE)
+    with open(path, "r") as f:
+        data = json.load(f)
+    for bone_name, bind_matrix in data.items():
+        data[bone_name] = Matrix(bind_matrix)
+    return data
+
+def set_pose_matrices(armature, matrix_map):
+    # set pose position to matrix_map
     bpy.ops.object.mode_set(mode='OBJECT')
     bpy.context.view_layer.update()
     bpy.context.view_layer.objects.active = armature
     bpy.ops.object.mode_set(mode='POSE')
 
-    # set pose to matrix_map
     def rec(pbone, parent_matrix):
         if pbone.name in matrix_map:
             matrix = matrix_map[pbone.name]
@@ -196,14 +210,52 @@ def set_pose_matrices(armature, mesh_objects, matrix_map):
         for child in pbone.children:
             rec(child, matrix)
 
-    for pbone in obj.pose.bones:
+    for pbone in armature.pose.bones:
         if not pbone.parent:
             rec(pbone, None)
 
     bpy.context.view_layer.update()
     bpy.ops.object.mode_set(mode='OBJECT')
 
-    # apply armature modifier
+def set_t_pose(armature):
+    # TODO this is written by Claude and seems more complicated than it has to
+    # be
+    target = get_bind_matrices()
+
+    # pose bones are only in sync with the data when not in edit mode
+    if armature.mode == 'EDIT':
+        bpy.context.view_layer.objects.active = armature
+        bpy.ops.object.mode_set(mode='OBJECT')
+
+    armature.data.pose_position = 'POSE'
+    pose_mats = {}
+
+    def solve(pbone):
+        bone = pbone.bone
+        if pbone.parent:
+            rest_rel = pbone.parent.bone.matrix_local.inverted() @ bone.matrix_local
+            base = pose_mats[pbone.parent.name] @ rest_rel
+        else:
+            base = bone.matrix_local
+
+        if pbone.name in target:
+            pbone.matrix_basis = base.inverted() @ target[pbone.name]
+            pose_mats[pbone.name] = target[pbone.name]
+        else:
+            pose_mats[pbone.name] = base @ pbone.matrix_basis
+
+        for child in pbone.children:
+            solve(child)
+
+    for pbone in armature.pose.bones:
+        if pbone.parent is None:
+            solve(pbone)
+
+    armature.update_tag()
+    bpy.context.view_layer.update()
+
+def apply_armature_pos(armature, mesh_objects):
+    # bake pose position into rest pose
     for mesh_object in mesh_objects:
         bpy.context.view_layer.objects.active = mesh_object
         mesh_object.select_set(True)
@@ -223,12 +275,3 @@ def set_pose_matrices(armature, mesh_objects, matrix_map):
         mod = mesh_object.modifiers.new(name="Armature", type='ARMATURE')
         mod.object = armature
         mod.use_vertex_groups = True
-
-
-def get_bind_matrix_transforms():
-    path = os.path.join(os.path.dirname(os.path.realpath(__file__)), "assets", "bind_matrix_transform.json")
-    with open(path, "r") as f:
-        data = json.load(f)
-    for bone_name, bind_matrix_transform in data.items():
-        data[bone_name] = Matrix(bind_matrix_transform)
-    return data

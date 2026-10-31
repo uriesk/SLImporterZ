@@ -115,7 +115,6 @@ def import_lod_mesh(lod_data, name, **kwargs):
     inverse_bind_matrices = kwargs.get("inverse_bind_matrices")
     skin_to_armature = kwargs.get("skin_to_armature", False)
     bones = kwargs.get("bones")
-    armature=kwargs.get("armature")
     # lod_data:
     #  [{
     #    Normal,
@@ -441,10 +440,12 @@ def import_slm(stream, name, **kwargs):
             f.write('\n'.join(tree_lines))
 
     armature = None
+    bake_to_existing_armature = False
     inverse_bind_matrices = None
     bind_shape_matrix = None
     joint_names = None
     bones = None
+    old_bone_matrices = {}
     if "skin" in slm_metadata:
         skin_offset = start_pos + header_size + slm_metadata["skin"]["offset"]
         skin_size = slm_metadata["skin"]["size"]
@@ -464,13 +465,13 @@ def import_slm(stream, name, **kwargs):
             joint_names = skin_data["joint_names"]
 
             # find existing armature or create new one
-            armature = None
             for armature_obj in bpy.data.objects:
                 if armature_obj.type != 'ARMATURE':
                     continue
                 existing_bones = set(bone.name for bone in armature_obj.data.bones)
                 if all(joint in existing_bones for joint in joint_names):
                     armature = armature_obj
+                    bake_to_existing_armature = True
             if armature is None:
                 armature = skeleton.add_skeleton(bpy.context)
 
@@ -479,37 +480,52 @@ def import_slm(stream, name, **kwargs):
                 bone = armature.data.bones[joint_name]
                 bone.use_deform = True
                 bones.append(bone)
-        if "inverse_bind_matrix" in skin_data:
-            # corret inverse bind matrices according to standard skeleton
-            bind_matrix_transforms = skeleton.get_bind_matrix_transforms()
-            inverse_bind_matrices = []
 
-            debug_text = f"bind shape matrix:\n{str(bind_shape_matrix)}\n\n"
+            if "inverse_bind_matrix" in skin_data:
+                # corret inverse bind matrices according to standard skeleton
+                bind_matrix_transforms = skeleton.get_bind_matrix_transforms()
+                inverse_bind_matrices = []
 
-            for i, inverse_bind_matrix in enumerate(skin_data["inverse_bind_matrix"]):
-                joint_name = joint_names[i]
-                inverse_bind_matrix = matrix_from_array(inverse_bind_matrix)
+                if not bake_to_existing_armature:
+                    bpy.ops.object.mode_set(mode='EDIT')
 
-                # NOTE: not implemented yet, ignore alt_inverse_bind_matrix, we
-                # only test meshes that do not have this currently
-                # if "alt_inverse_bind_matrix" in skin_data:
-                #     inverse_bind_matrix = matrix_from_array(skin_data["alt_inverse_bind_matrix"][i])
+                debug_text = f"bind shape matrix:\n{str(bind_shape_matrix)}\n\n"
 
-                bind_matrix_transform = bind_matrix_transforms[joint_name]
-                bind_matrix = inverse_bind_matrix.inverted()
+                for i, inverse_bind_matrix in enumerate(skin_data["inverse_bind_matrix"]):
+                    joint_name = joint_names[i]
+                    inverse_bind_matrix = matrix_from_array(inverse_bind_matrix)
 
-                debug_matrix = bind_matrix
-                translation, rotation, scale = debug_matrix.decompose()
-                debug_text += joint_name + "\n" + str(debug_matrix) + f"\nTranslation:    {translation}\nRotation:    {tuple(math.degrees(a) for a in rotation.to_euler())}\nScale:    {scale}\n\n"
+                    # NOTE: not implemented yet, ignore alt_inverse_bind_matrix, we
+                    # only test meshes that do not have this currently
+                    # if "alt_inverse_bind_matrix" in skin_data:
+                    #     inverse_bind_matrix = matrix_from_array(skin_data["alt_inverse_bind_matrix"][i])
 
-                bind_matrix = bind_matrix @ bind_matrix_transform
-                inverse_bind_matrix = bind_matrix.inverted()
+                    bind_matrix_transform = bind_matrix_transforms[joint_name]
+                    bind_matrix = inverse_bind_matrix.inverted()
 
-                inverse_bind_matrices.append(inverse_bind_matrix)
+                    if create_debug_info:
+                        translation, rotation, scale = bind_matrix.decompose()
+                        debug_text += joint_name + "\n" + str(bind_matrix) + f"\nTranslation:    {translation}\nRotation:    {tuple(math.degrees(a) for a in rotation.to_euler())}\nScale:    {scale}\n\n"
 
-            ibm_filepath = os.path.splitext(filepath)[0] + "_ibm" + ".txt"
-            with open(ibm_filepath, 'w', encoding='utf-8') as f:
-                f.write(debug_text)
+                    bind_matrix = bind_matrix @ bind_matrix_transform
+
+                    if not bake_to_existing_armature:
+                        armature_bone = armature.data.edit_bones[joint_name]
+                        sx, sy, sz = bind_matrix.to_scale()
+                        scale_matrix = Matrix.Diagonal((sx, sy, sz, 1.0))
+                        old_bone_matrices[joint_names[i]] = armature_bone.matrix.copy() @ scale_matrix.inverted()
+                        armature_bone.matrix = bind_matrix
+
+                    inverse_bind_matrix = bind_matrix.inverted()
+                    inverse_bind_matrices.append(inverse_bind_matrix)
+
+                if create_debug_info and filepath is not None:
+                    ibm_filepath = os.path.splitext(filepath)[0] + "_ibm" + ".txt"
+                    with open(ibm_filepath, 'w', encoding='utf-8') as f:
+                        f.write(debug_text)
+
+                if not bake_to_existing_armature:
+                    bpy.ops.object.mode_set(mode='EDIT')
 
         # NOTE: not implemented yet, ignore alt_inverse_bind_matrix, we only
         # test meshes that do not have this currently
@@ -529,15 +545,6 @@ def import_slm(stream, name, **kwargs):
             # optional, used to provide a pelvis fixup for avatar rigs that
             # alter the default Second Life skeleton
             print("pelvis_offset" + str(skin_data["pelvis_offset"]))
-
-        print("bind_shape_matrix")
-        print(bind_shape_matrix)
-        for joint_idx, joint_name in enumerate(joint_names):
-            inverse_bind_matrix = inverse_bind_matrices[joint_idx]
-            bone_matrix = bones[joint_idx].matrix_local
-            joint_matrix =  bone_matrix @ inverse_bind_matrix
-            print("skin joint matrix " + joint_name)
-            print(joint_matrix)
 
     for lod_name, type_name in (("high_lod", None), ("medium_lod", "LOD2"), ("low_lod", "LOD1"), ("lowest_lod", "LOD0"), ("physics_mesh", "PHYS")):
 
@@ -562,9 +569,8 @@ def import_slm(stream, name, **kwargs):
                 joint_names=joint_names,
                 bind_shape_matrix=bind_shape_matrix,
                 inverse_bind_matrices=inverse_bind_matrices,
-                armature=armature,
                 bones=bones,
-                skin_to_armature=True,
+                skin_to_armature=bake_to_existing_armature,
             )
             if mesh_object is not None:
                 imported_mesh_objects.append({
@@ -582,5 +588,8 @@ def import_slm(stream, name, **kwargs):
                     mod = mesh_object.modifiers.new(name="Armature", type='ARMATURE')
                     mod.object = armature
                     mod.use_vertex_groups = True
+
+    if armature is not None and not bake_to_existing_armature:
+        skeleton.set_pose_matrices(armature, old_bone_matrices)
 
     return imported_mesh_objects
