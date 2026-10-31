@@ -250,33 +250,3 @@ def get_calibration_matrices():
     for bone_name, calibration_matrices in data.items():
         data[bone_name] = Matrix(calibration_matrices)
     return data
-
-class SLIZ_ADD_armature(bpy.types.Operator):
-    bl_idname = "object.sliz_armature"
-    bl_label = "Second Life Armature"
-    bl_description = "Add a Second Life compatible armature with standard bone hierarchy"
-    bl_options = {'REGISTER', 'UNDO'}
-
-    def execute(self, context):
-        add_skeleton(context)
-        self.report({'INFO'}, "Second Life compatible armature added")
-        return {'FINISHED'}
-
-def menu_func_add(self, context):
-    self.layout.separator()
-    self.layout.operator(
-        SLIZ_ADD_armature.bl_idname,
-        text="Second Life Skeleton",
-        icon='ARMATURE_DATA'
-    )
-
-def register():
-    bpy.utils.register_class(SLIZ_ADD_armature)
-    bpy.types.VIEW3D_MT_add.append(menu_func_add)
-
-def unregister():
-    bpy.types.VIEW3D_MT_add.remove(menu_func_add)
-    bpy.utils.unregister_class(SLIZ_ADD_armature)
-
-if __name__ == "__main__":
-    register()

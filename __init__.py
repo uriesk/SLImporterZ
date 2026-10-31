@@ -16,27 +16,27 @@
     along with this program.  If not, see <https://www.gnu.org/licenses/>.
 '''
 
-import bpy
-
 if "bpy" in locals():
     import importlib
-    if "slm" in locals():
-        importlib.reload(slm)
-    if "oxp" in locals():
-        importlib.reload(oxp)
+    if "op_slm" in locals():
+        importlib.reload(op_slm)
+    if "op_oxp" in locals():
+        importlib.reload(op_oxp)
     if "llsdz" in locals():
         importlib.reload(llsdz)
     if "utils" in locals():
         importlib.reload(utils)
-    if "skeleton" in locals():
-        importlib.reload(skeleton)
-    if "lsl" in locals():
-        importlib.reload(lsl)
+    if "op_skeleton" in locals():
+        importlib.reload(op_skeleton)
+    if "op_lsl" in locals():
+        importlib.reload(op_lsl)
 
-from . import oxp
-from . import slm
-from . import skeleton
-from . import lsl
+import bpy
+
+from . import op_oxp
+from . import op_slm
+from . import op_skeleton
+from . import op_lsl
 
 class SLIZ_preferences(bpy.types.AddonPreferences):
     bl_idname = __package__
@@ -56,16 +56,16 @@ def menu_func_import_seperator(self, context):
 def register():
     bpy.utils.register_class(SLIZ_preferences)
     bpy.types.TOPBAR_MT_file_import.append(menu_func_import_seperator)
-    slm.register()
-    oxp.register()
-    skeleton.register()
-    lsl.register()
+    op_slm.register()
+    op_oxp.register()
+    op_skeleton.register()
+    op_lsl.register()
 
 def unregister():
-    lsl.unregister()
-    skeleton.unregister()
-    oxp.unregister()
-    slm.unregister()
+    op_lsl.unregister()
+    op_skeleton.unregister()
+    op_oxp.unregister()
+    op_slm.unregister()
     bpy.types.TOPBAR_MT_file_import.remove(menu_func_import_seperator)
     bpy.utils.unregister_class(SLIZ_preferences)
 
