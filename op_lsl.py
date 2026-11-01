@@ -32,9 +32,10 @@ class TEXT_OT_generate_script(bpy.types.Operator):
 
     def execute(self, context):
         # get or create text block
-        text_block = context.space_data.text
+        name = "Set Textures LSL"
+        text_block = bpy.data.texts.get(name)
         if not text_block:
-            text_block = bpy.data.texts.new("Set Textures LSL")
+            text_block = bpy.data.texts.new(name)
             context.space_data.text = text_block
 
         text_block.clear()
@@ -52,9 +53,10 @@ class TEXT_OT_generate_object_tree(bpy.types.Operator):
 
     def execute(self, context):
         # get or create text block
-        text_block = context.space_data.text
+        name = "SL UUIDs"
+        text_block = bpy.data.texts.get(name)
         if not text_block:
-            text_block = bpy.data.texts.new("SL UUIDs")
+            text_block = bpy.data.texts.new(name)
             context.space_data.text = text_block
 
         text_block.clear()

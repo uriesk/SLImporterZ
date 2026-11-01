@@ -141,7 +141,7 @@ class OXPParser():
         image.pack()
         return image
 
-    def get_text(self, uuid, alternative_name=None):
+    def get_lsltext(self, uuid, alternative_name=None):
         if not uuid or self.oxp_data is None:
             return None
         if uuid == "00000000-0000-0000-0000-000000000000":
@@ -171,6 +171,54 @@ class OXPParser():
         text = bpy.data.texts.new(name + ".lsl")
         text["sl_uuid"] = uuid
         text.write(content)
+        text.cursor_set(0)
+        return text
+
+    def get_notecard(self, uuid, alternative_name=None):
+        if not uuid or self.oxp_data is None:
+            return None
+        if uuid == "00000000-0000-0000-0000-000000000000":
+            return None
+
+        # search in existing textblocks first
+        for text in bpy.data.texts:
+            if text.get("sl_uuid") == uuid:
+                return text
+
+        assets = self.oxp_data.get("asset")
+        if not isinstance(assets, dict):
+            return None
+        text_asset = assets.get(uuid)
+        if not isinstance(text_asset, dict):
+            return None
+        filepath = text_asset.get("filepath")
+        if not filepath or not os.path.exists(filepath):
+            return None
+
+        with open(filepath, 'r', encoding='utf-8') as f:
+            content = f.read()
+
+        # notecards have some weird internal format
+        #content = utils.to_unix_line_endings(content)
+        marker = "Text length "
+        idx = content.find(marker)
+        body_end = content.rfind("}")
+        if idx == -1 or body_end == -1:
+            return None
+        line_end = content.find("\n", idx)
+        if line_end == -1 or line_end + 1 >= body_end:
+            return None
+        body_start = line_end + 1
+        content = content[body_start:body_end]
+
+        name = text_asset.get("name")
+        # use alternative_name if name from oxp data isn't available or an uuid
+        if not name or (len(name) == 36 and name[8] == "-"):
+            name = alternative_name
+        text = bpy.data.texts.new(name + ".txt")
+        text["sl_uuid"] = uuid
+        text.write(content)
+        text.cursor_set(0)
         return text
 
     def _get_material_from_gltf(self, gltf_data):
@@ -286,7 +334,9 @@ class OXPParser():
                 case "texture":
                     self.get_texture(uuid, name)
                 case "lsltext":
-                    self.get_text(uuid, name)
+                    self.get_lsltext(uuid, name)
+                case "notecard":
+                    self.get_notecard(uuid, name)
 
     def _create_materials_for_prim(self, prim_data, name="slmat"):
         materials = []

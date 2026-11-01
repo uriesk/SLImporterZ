@@ -233,6 +233,9 @@ class LLSDBinaryParser():
                         case "lsltext":
                             target_filepath = path_join(self.asset_folder, uuid + ".lsl")
                             break
+                        case "notecard":
+                            target_filepath = path_join(self.asset_folder, uuid + ".txt")
+                            break
                         case "material":
                             target_filepath = path_join(self.asset_folder, uuid + ".slmat")
                             break
