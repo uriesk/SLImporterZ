@@ -44,7 +44,7 @@ def create_obj_hash(obj):
     return hash_object.hexdigest()
 
 def print_tree(data, indent="", prefix="", is_last=True):
-    """Return a string representation of the tree structure."""
+    # Return a string representation of the tree structure
     lines = []
 
     if isinstance(data, dict):
@@ -102,3 +102,30 @@ def print_tree(data, indent="", prefix="", is_last=True):
         lines.append(f"{indent}    └── {type(data).__name__}: {repr(data)[:50]}")
 
     return lines
+
+def print_dict_tree(data, indent=""):
+    # Return a string representation of nested dicts with only string values
+    if not isinstance(data, dict):
+        return ""
+    lines = []
+
+    longest_key = 0
+    for key in data.keys():
+        if len(key) > longest_key:
+            longest_key = len(key)
+
+    for key, value in data.items():
+        if isinstance(value, str):
+            lines.append(f"{indent}{key}:  {" " * (longest_key - len(key))}{value}")
+        elif isinstance(data, dict):
+            lines.append(f"{indent}{key}")
+            child_indent_added_length = 3 + longest_key
+            spacer_length = max(2, round(child_indent_added_length - len(key) / 2))
+            child_dict_indent = " " * (len(indent) + child_indent_added_length - spacer_length) + "└" + "─" * (spacer_length - 2) + " "
+
+            child = print_dict_tree(value, child_dict_indent)
+            if child:
+                lines.append(print_dict_tree(value, child_dict_indent))
+        indent = " " * len(indent)
+
+    return "\n".join(lines)

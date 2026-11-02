@@ -36,10 +36,10 @@ class TEXT_OT_generate_script(bpy.types.Operator):
         text_block = bpy.data.texts.get(name)
         if not text_block:
             text_block = bpy.data.texts.new(name)
-            context.space_data.text = text_block
+        context.space_data.text = text_block
 
         text_block.clear()
-        lsl_text, _ = lsl.create_lsl_script()
+        lsl_text = lsl.create_lsl_script()
         text_block.write(lsl_text)
         text_block.cursor_set(0)
 
@@ -57,11 +57,11 @@ class TEXT_OT_generate_object_tree(bpy.types.Operator):
         text_block = bpy.data.texts.get(name)
         if not text_block:
             text_block = bpy.data.texts.new(name)
-            context.space_data.text = text_block
+        context.space_data.text = text_block
 
         text_block.clear()
-        _, object_tree = lsl.create_lsl_script()
-        tree_text = "\n".join(utils.print_tree(object_tree))
+        object_trees = lsl.create_uuid_tree()
+        tree_text = utils.print_dict_tree(object_trees)
         text_block.write(tree_text)
         text_block.cursor_set(0)
 

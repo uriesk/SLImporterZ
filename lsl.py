@@ -141,16 +141,29 @@ def create_prim_shape_lsl(prim_data, subindent, link_reference_text = "LINK_THIS
     lsl_text += subindent + "]);\n"
     return lsl_text
 
-def create_object_properties_lsl(obj, subindent, is_linked = True):
+def create_object_properties_lsl(obj, subindent = "", is_linked = True):
     lsl_text = ""
     parindent = subindent + "    "
+    is_dict = isinstance(obj, dict)
 
     # See https://wiki.secondlife.com/wiki/LlSetPrimitiveParams
     params = []
+    object_tree = {}
+
+    if "sl_uuid" in obj:
+        object_tree["uuid"] = obj["sl_uuid"]
+    if not is_dict and "sl_uuid" in obj.data:
+        object_tree["mesh_uuid"] = obj.data["sl_uuid"]
 
     if "sl_particles" in obj:
         particle_data = json.loads(obj["sl_particles"])
         particle_params = []
+
+        if "PSYS_SRC_TEXTURE" in particle_params:
+            object_tree["Particles Texture"] = particle_params["PSYS_SRC_TEXTURE"]
+        if "PSYS_SRC_TARGET_KEY" in particle_params:
+            object_tree["Particles Target"] = particle_params["PSYS_SRC_TARGET_KEY"]
+
         for key, value in particle_data.items():
             if isinstance(value, list):
                 if len(value) == 2:
@@ -215,7 +228,6 @@ def create_object_properties_lsl(obj, subindent, is_linked = True):
             # [ string texture, float fov, float focus, float ambiance ]
             params.append(f"\n{parindent}PRIM_PROJECTOR, \"{lsl_escape(light_data["texture_uuid"])}\", {light_data["fov"]:.3f}, {light_data["focus"]:.3f}, {light_data["ambiance"]:.3f}")
 
-    is_dict = isinstance(obj, dict)
     material_slots = obj["material_slots"] if is_dict else obj.material_slots
 
     for i, slot in enumerate(material_slots):
@@ -226,17 +238,17 @@ def create_object_properties_lsl(obj, subindent, is_linked = True):
             continue
 
         # recreate face properties based on material
-        object_tree = []
         face_tree = {}
-        object_tree.append(face_tree)
+        object_tree["Face " + str(i)] = face_tree
+        # gets set when there is a pbr material
+        pbr_tree = None
 
-        # pbr material
-        is_pbr_material = False
         # values that got overridden
         pbr_overrides = []
         if "sl_uuid" in material:
-            is_pbr_material = True
-            face_tree["PBR Material"] = material["sl_uuid"]
+            pbr_tree = {
+                "uuid": material["sl_uuid"]
+            }
             params.append(f"\n{parindent}PRIM_RENDER_MATERIAL, {i}, \"{lsl_escape(material["sl_uuid"])}\"")
             if "sl_gltf_override" in material:
                 pbr_overrides = json.loads(material["sl_gltf_override"])
@@ -308,7 +320,10 @@ def create_object_properties_lsl(obj, subindent, is_linked = True):
                     # [ string texture, vector repeats, vector offsets, float rotation_in_radians ]
                     params.append(f"\n{parindent}PRIM_TEXTURE, {i}, \"{lsl_escape(image["sl_uuid"])}\", <{texture_ss}, {texture_st}, 1.0>, <{texture_os}, {texture_ot}, 0.0>, {texture_rot}")
                     # pbr if overridden
+                    if pbr_tree is not None:
+                        pbr_tree["Base Color Texture"] = image["sl_uuid"]
                     if "pbrMetallicRoughness" in pbr_overrides:
+                        pbr_tree["Base Color Texture"] += " Overriden"
                         # [ string texture, vector repeats, vector offsets, float rotation_in_radians, vector color, float alpha, integer gltf_alpha_mode, float alpha_mask_cutoff, integer double_sided ]
                         params.append(f"\n{parindent}PRIM_GLTF_BASE_COLOR, {i}, \"{lsl_escape(image["sl_uuid"])}\", <{texture_ss}, {texture_st}, 1.0>, <{texture_os}, {texture_ot}, 0.0>, {texture_rot}, {tint_color}, {alpha:.2f}, {alpha_mode}, {alpha_cutoff:.2f}, \"\"")
         else:
@@ -338,7 +353,10 @@ def create_object_properties_lsl(obj, subindent, is_linked = True):
                             # [ string texture, vector repeats, vector offsets, float rotation_in_radians ]
                             params.append(f"\n{parindent}PRIM_NORMAL, {i}, \"{lsl_escape(image["sl_uuid"])}\", <{texture_ss}, {texture_st}, 1.0>, <{texture_os}, {texture_ot}, 0.0>, {texture_rot}")
                             # pbr if overridden
+                            if pbr_tree is not None:
+                                pbr_tree["Normal Map Texture"] = image["sl_uuid"]
                             if "normalTexture" in pbr_overrides:
+                                pbr_tree["Normal Map Texture"] += " Overriden"
                                 #  string texture, vector repeats, vector offsets, float rotation_in_radians ]
                                 params.append(f"\n{parindent}PRIM_GLTF_NORMAL, {i}, \"{lsl_escape(image["sl_uuid"])}\", <{texture_ss}, {texture_st}, 1.0>, <{texture_os}, {texture_ot}, 0.0>, {texture_rot}")
 
@@ -385,18 +403,20 @@ def create_object_properties_lsl(obj, subindent, is_linked = True):
 
         # orm map (pbr only)
         orm_texture_node = None
-        if "occlusionTexture" in pbr_overrides or "occlusionTextureTransform" in pbr_overrides:
-            orm_input = principled.inputs["Metallic"]
-            if orm_input.links:
-                split_input = orm_input.links[0].from_node
-                if split_input.bl_idname == "ShaderNodeSeparateColor":
-                    orm_color_input = split_input.inputs.get("Color")
-                    if orm_color_input and orm_color_input.links:
-                        from_node = orm_color_input.links[0].from_node
-                        if from_node.bl_idname == "ShaderNodeTexImage":
-                            image = from_node.image
-                            if "sl_uuid" in image:
-                                face_tree["ORM Map Texture"] = image["sl_uuid"]
+        orm_input = principled.inputs["Metallic"]
+        if orm_input.links:
+            split_input = orm_input.links[0].from_node
+            if split_input.bl_idname == "ShaderNodeSeparateColor":
+                orm_color_input = split_input.inputs.get("Color")
+                if orm_color_input and orm_color_input.links:
+                    from_node = orm_color_input.links[0].from_node
+                    if from_node.bl_idname == "ShaderNodeTexImage":
+                        image = from_node.image
+                        if "sl_uuid" in image:
+                            if pbr_tree is not None:
+                                pbr_tree["ORM Map Texture"] = image["sl_uuid"]
+                            if "occlusionTexture" in pbr_overrides or "occlusionTextureTransform" in pbr_overrides:
+                                pbr_tree["ORM Map Texture"] += " Overridden"
                                 orm_texture_node = from_node
         metallic_factor = "\"\""
         roughness_factor = "\"\""
@@ -419,15 +439,17 @@ def create_object_properties_lsl(obj, subindent, is_linked = True):
 
         # emissive map (pbr only)
         emissive_texture_node = None
-        if "emissiveTexture" in pbr_overrides or "emissiveTextureTransform" in pbr_overrides:
-            emission_input = principled.inputs.get("Emission")
-            if emission_input and emission_input.links:
-                from_node = emission_input.links[0].from_node
-                if from_node.bl_idname == "ShaderNodeTexImage":
-                    image = from_node.image
-                    if "sl_uuid" in image:
+        emission_input = principled.inputs.get("Emission")
+        if emission_input and emission_input.links:
+            from_node = emission_input.links[0].from_node
+            if from_node.bl_idname == "ShaderNodeTexImage":
+                image = from_node.image
+                if "sl_uuid" in image:
+                    if pbr_tree is not None:
+                        pbr_tree["Emission Map Texture"] = image["sl_uuid"]
+                    if "emissiveTexture" in pbr_overrides or "emissiveTextureTransform" in pbr_overrides:
+                        pbr_tree["Emission Map Texture"] += " Overridden"
                         emissive_texture_node = from_node
-                        face_tree["Emission Map Texture"] = image["sl_uuid"]
         emission_factor = "\"\""
         if "emissiveFactor" in pbr_overrides:
             emission_factor = principled.inputs["Emission Color"].default_value
@@ -446,18 +468,34 @@ def create_object_properties_lsl(obj, subindent, is_linked = True):
             #  [ string texture, vector repeats, vector offsets, float rotation_in_radians, vector emissive_tint ]
             params.append(f"\n{parindent}PRIM_GLTF_EMISSIVE, {i}, {emission_texture}, <{texture_ss}, {texture_st}, 1.0>, <{texture_os}, {texture_ot}, 0.0>, {texture_rot}, {emission_factor}")
 
+        if pbr_tree is not None:
+            face_tree["PBR Material"] = pbr_tree
+
     if is_linked:
         lsl_text += f"{subindent}llSetLinkPrimitiveParamsFast(link_num, [{",".join(params)}\n{subindent}]);\n"
     else:
         lsl_text += f"{subindent}llSetLinkPrimitiveParamsFast(LINK_THIS, [{",".join(params)}\n{subindent}]);\n"
     return lsl_text, object_tree
 
-def create_lsl_script():
-    # creates lsl script and object tree for setting properties and textures
-    # by uuid
+def create_uuid_tree():
+    # create tree of object sl uuids
     objects_tree = {}
+
+    if bpy.data.objects:
+        for obj in bpy.data.objects:
+            if obj.type != "MESH":
+                continue
+            if obj.name.endswith(('_LOD0', '_LOD1', '_LOD2', '_PHYS')):
+                continue
+            _, object_tree = create_object_properties_lsl(obj)
+            objects_tree[obj.name] = object_tree
+
+    return objects_tree
+
+def create_lsl_script():
+    # creates lsl script for setting properties and textures by uuid
     if not bpy.data.objects:
-        return "default\n{\n    \\\\ No Objects Available\n}", objects_tree
+        return "default\n{\n    \\\\ No Objects Available\n}"
 
     lsl_text = """default
 {
@@ -499,8 +537,7 @@ def create_lsl_script():
         subindent = indent + "    "
         lsl_text += f"{subindent}used_names += [\"{lsl_escape(obj.name)}\"];\n"
         amount_added += 1
-        object_lsl_text, object_tree = create_object_properties_lsl(obj, subindent)
-        objects_tree[obj.name] = object_tree
+        object_lsl_text, _ = create_object_properties_lsl(obj, subindent)
         lsl_text += object_lsl_text + indent + "}"
 
     lsl_text += """
@@ -519,4 +556,4 @@ def create_lsl_script():
         llRemoveInventory(llGetScriptName());
     }
 }"""
-    return lsl_text, objects_tree
+    return lsl_text
