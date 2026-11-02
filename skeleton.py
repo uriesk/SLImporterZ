@@ -55,6 +55,7 @@ def get_skeleton(use_pivot=False):
             entry["pos"] = entry["pivot_orig"]
         else:
             entry["pos"] = entry["pos_orig"]
+
         if parent:
             offset = result[parent]["pos"]
             entry["pos"] = [entry["pos"][i]+offset[i] for i in range(0,3)]
@@ -66,7 +67,7 @@ def get_skeleton(use_pivot=False):
             "XYZ"
         ).to_matrix().to_4x4()
 
-        entry["end"] = [entry["end_orig"][i]+entry["pos"][i] for i in range(0,3)]
+        entry["end"] = [entry["end_orig"][i] + entry["pos"][i] for i in range(0,3)]
 
         sx, sy, sz = entry["scale_orig"]
         entry["scale"] = Matrix.Diagonal((sx, sy, sz, 1.0))

@@ -204,6 +204,18 @@ def import_lod_mesh(lod_data, name, **kwargs):
     mesh.from_pydata(vertices, [], triangles)
     del vertices
 
+    # assign Empty Material Slots
+    for i in range(len(face_tirangle_offsets)):
+        mesh.materials.append(None)
+    if mesh.polygons:
+        current_face = 0;
+        current_threshold = face_tirangle_offsets[current_face]
+        for poly in mesh.polygons:
+            while poly.index >= current_threshold:
+                current_face += 1
+                current_threshold = face_tirangle_offsets[current_face]
+            poly.material_index = current_face
+
     # assign UV
     uv_layer = mesh.uv_layers.new(name="SLIZ_UVMap")
     uv_data = uv_layer.data
@@ -353,18 +365,6 @@ def import_lod_mesh(lod_data, name, **kwargs):
             for vertex_idx, weight in joint_weights:
                 vertex_group.add([vertex_idx], weight, 'REPLACE')
         del weights_per_joint
-
-    # assign Empty Material Slots
-    for i in range(len(face_tirangle_offsets)):
-        obj.data.materials.append(None)
-    if mesh.polygons:
-        current_face = 0;
-        current_threshold = face_tirangle_offsets[current_face]
-        for poly in mesh.polygons:
-            while poly.index >= current_threshold:
-                current_face += 1
-                current_threshold = face_tirangle_offsets[current_face]
-            poly.material_index = current_face
 
     obj.location = (0, 0, 0)
     return obj

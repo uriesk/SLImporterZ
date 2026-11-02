@@ -20,7 +20,7 @@ import bpy
 import json
 import math
 
-LSL_TEXTURE_GRAB_FUNC = """string GetTextureFromNameOrKey(string name, string key)
+LSL_TEXTURE_GRAB_FUNC = """string GetTextureFromNameOrKey(string name, string i_key)
 {
     if (llGetInventoryType(name) == INVENTORY_TEXTURE)
     {
@@ -28,7 +28,7 @@ LSL_TEXTURE_GRAB_FUNC = """string GetTextureFromNameOrKey(string name, string ke
         if (invKey != NULL_KEY)
             return (string)invKey;
     }
-    return key;
+    return i_key;
 }
 """
 
@@ -232,7 +232,7 @@ def create_object_properties_lsl(obj, subindent = "", is_linked = True):
         # integer mode, integer side, integer x_frames, integer y_frames, float start, float length, float rate
         texture_anim_arguments = f"{texture_anim_data.get("mode", 0)}, {texture_anim_data.get("face", "ALL_SIDES")}, {texture_anim_data.get("sizeX", 1)}, {texture_anim_data.get("sizeY", 1)}, {texture_anim_data.get("start", 0.0):.6f}, {texture_anim_data.get("length", 0.0):.6f}, {texture_anim_data.get("rate", 25.0):.6f}"
         if is_linked:
-            lsl_text += f"{subindent}llSetLinkTextureAnim({texture_anim_arguments});\n"
+            lsl_text += f"{subindent}llSetLinkTextureAnim(link_num, {texture_anim_arguments});\n"
         else:
             lsl_text += f"{subindent}llSetTextureAnim({texture_anim_arguments});\n"
 
@@ -319,7 +319,7 @@ def create_object_properties_lsl(obj, subindent = "", is_linked = True):
         else:
             alpha = principled.inputs["Alpha"].default_value
 
-        if alpha_mode != "PRIM_ALPHA_MODE_BLEND" or alpha_cutoff:
+        if alpha_mode != "PRIM_ALPHA_MODE_NONE" or alpha_cutoff:
             params.append(f"\n{parindent}PRIM_ALPHA_MODE, {i}, {alpha_mode}, {round(alpha_cutoff * 255)}")
 
         # base color
