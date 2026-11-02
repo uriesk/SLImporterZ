@@ -16,6 +16,7 @@
     along with this program.  If not, see <https://www.gnu.org/licenses/>.
 '''
 
+import os
 import json
 import hashlib
 import re
@@ -27,6 +28,12 @@ _SL_UUID_RE = re.compile(
 
 def is_sl_uuid(s):
     return isinstance(s, str) and bool(_SL_UUID_RE.match(s))
+
+def path_join(trusted_path, filename):
+    basename = os.path.basename(filename)
+    if not basename:
+        raise AttributeError("No basename")
+    return os.path.join(trusted_path, basename)
 
 def merge_dicts(dict1, dict2):
     # merge two dicts together

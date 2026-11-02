@@ -26,6 +26,10 @@ in the Scripting Text Editor within Blender
 
 ![Set to T-Pose](./images/apply_t_pose.webp)
 
+- Export all Images that are loaded
+
+![Export all Images](./images/export-all-images.webp)
+
 ## References
 
 - [SLM Mesh Format](https://wiki.secondlife.com/wiki/Mesh/Mesh_Asset_Format)

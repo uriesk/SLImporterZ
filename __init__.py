@@ -30,6 +30,8 @@ if "bpy" in locals():
         importlib.reload(op_skeleton)
     if "op_lsl" in locals():
         importlib.reload(op_lsl)
+    if "op_images" in locals():
+        importlib.reload(op_images)
 
 import bpy
 
@@ -37,6 +39,7 @@ from . import op_oxp
 from . import op_slm
 from . import op_skeleton
 from . import op_lsl
+from . import op_images
 
 class SLIZ_preferences(bpy.types.AddonPreferences):
     bl_idname = __package__
@@ -60,8 +63,10 @@ def register():
     op_oxp.register()
     op_skeleton.register()
     op_lsl.register()
+    op_images.register()
 
 def unregister():
+    op_images.unregister()
     op_lsl.unregister()
     op_skeleton.unregister()
     op_oxp.unregister()

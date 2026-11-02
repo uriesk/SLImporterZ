@@ -90,15 +90,24 @@ class OXPParser():
 
         for uuid, prim in prims.items():
             mesh = prim.get("mesh")
-            # allow different ways of definign the uuid of the mesh in a prim
+
+            # allow different ways of defining the uuid of the mesh in a prim
+            prim_has_mesh = False
             if isinstance(mesh, str) and mesh == mesh_uuid:
-                prim["uuid"] = uuid
-                found_prims.append(prim)
+                prim_has_mesh = True
             elif isinstance(mesh, dict):
                 for value in mesh.values():
                     if value == mesh_uuid:
-                        prim["uuid"] = uuid
-                        found_prims.append(prim)
+                        prim_has_mesh = True
+            else:
+                sculpt = prim.get("sculpt")
+                # sculpt with type 5 PRIM_SCULPT_TYPE_MESH
+                if sculpt and isinstance(sculpt, dict) and (sculpt.get("type", 0) & 0x0F) == 0x05 and sculpt.get("texture") == mesh_uuid:
+                    prim_has_mesh = True
+
+            if prim_has_mesh:
+                prim["uuid"] = uuid
+                found_prims.append(prim)
         return found_prims
 
     def get_prim_by_uuid(self, prim_uuid):
@@ -861,7 +870,8 @@ class OXPParser():
             return
 
         for prim_uuid, prim_data in prims_data.items():
-            if "mesh" in prim_data:
+            # sculpt type 5 is PRIM_SCULPT_TYPE_MESH
+            if "mesh" in prim_data or ("sculpt" in prim_data and isinstance(prim_data["sculpt"], dict) and (prim_data["sculpt"].get("type", 0) & 0x0F) == 0x05):
                 continue
 
             name = prim_data.get("name")
@@ -874,7 +884,8 @@ class OXPParser():
             for i, material in enumerate(materials):
                 fake_obj["material_slots"].append({ "material": material })
 
-            lsl_text = """default
+            lsl_text = lsl.LSL_TEXTURE_GRAB_FUNC + """
+default
 {
     state_entry()
     {\n"""

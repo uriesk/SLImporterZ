@@ -20,11 +20,27 @@ import bpy
 import json
 import math
 
-from . import utils
-
+LSL_TEXTURE_GRAB_FUNC = """string GetTextureFromNameOrKey(string name, string key)
+{
+    if (llGetInventoryType(name) == INVENTORY_TEXTURE)
+    {
+        key invKey = llGetInventoryKey(name);
+        if (invKey != NULL_KEY)
+            return (string)invKey;
+    }
+    return key;
+}
+"""
 
 def lsl_escape(s):
     return s.replace("\\", "\\\\").replace('"', '\\"')
+
+def _lsl_texture(uuid):
+    images = {}
+    for image in bpy.data.images:
+        if image.get("sl_uuid") == uuid:
+            return f"GetTextureFromNameOrKey(\"{lsl_escape(image.name)}\", \"{lsl_escape(uuid)}\")"
+    return f"\"{uuid}\""
 
 def _get_trans(node):
     # get translation from image node
@@ -44,6 +60,7 @@ def _get_trans(node):
 
     return (f"{texture_os:.6f}", f"{texture_ot:.6f}", f"{texture_ss:.6f}", f"{texture_st:.6f}", f"{texture_rot:.3f}")
 
+
 def create_prim_shape_lsl(prim_data, subindent, link_reference_text = "LINK_THIS"):
     prim_volume_data = prim_data.get("volume")
     prim_scale = prim_data.get("scale")
@@ -58,6 +75,8 @@ def create_prim_shape_lsl(prim_data, subindent, link_reference_text = "LINK_THIS
     lsl_text = f"{subindent}llSetLinkPrimitiveParamsFast({link_reference_text}, [\n"
 
     lsl_text += f"{parindent}PRIM_SIZE, <{prim_scale[0]:.6f}, {prim_scale[1]:.6f}, {prim_scale[2]:.6f}>,\n"
+
+    lsl_text += f"{parindent}PRIM_NAME, \"{lsl_escape(prim_data["name"])}\"\n"
 
     path_curve = path.get("curve")
     profile_curve = profile.get("curve")
@@ -89,7 +108,6 @@ def create_prim_shape_lsl(prim_data, subindent, link_reference_text = "LINK_THIS
                 prim_type = "PRIM_TYPE_CYLINDER"
             case (0x00, 0x20):
                 # circle, circle
-                # NOTE: This could also be a sculpt
                 prim_type = "PRIM_TYPE_TORUS"
             case (0x01, 0x10):
                 # square, line
@@ -136,7 +154,7 @@ def create_prim_shape_lsl(prim_data, subindent, link_reference_text = "LINK_THIS
             lsl_text += f"{parindent}<{path["scale_x"]:.6f}, {path["scale_y"]:.6f}, 0.0>, <{path["shear_x"]:.6f}, {path["shear_y"]:.6f}, 0.0>, <{profile["begin"]:.6f}, {profile["end"]:.6f}, 0.0>, <{path["taper_x"]:.6f}, {path["taper_y"]:.6f}, 0.0>, {path["revolutions"]:.6f}, {path["radius_offset"]:.6f}, {path["skew"]:.6f}\n"
         case "PRIM_TYPE_SCULPT":
             # string map, integer type
-            lsl_text += f"{parindent}\"{lsl_escape(sculpt_texture_uuid)}\", {sculpt_type}\n"
+            lsl_text += f"{parindent}{_lsl_texture(sculpt_texture_uuid)}, {sculpt_type}\n"
 
     lsl_text += subindent + "]);\n"
     return lsl_text
@@ -172,8 +190,10 @@ def create_object_properties_lsl(obj, subindent = "", is_linked = True):
             elif isinstance(value, float):
                 value = f"{value:.8f}"
             elif isinstance(value, str):
-                if utils.is_sl_uuid(value):
+                if key == "PSYS_SRC_TARGET_KEY":
                     value = f"(key)\"{lsl_escape(value)}\""
+                if key == "PSYS_SRC_TEXTURE":
+                    value = _lsl_texture(value)
                 else:
                     value = f"\"{lsl_escape(value)}\""
             else:
@@ -225,8 +245,10 @@ def create_object_properties_lsl(obj, subindent = "", is_linked = True):
         # [ integer boolean, vector linear_color, float intensity, float radius, float falloff ]
         params.append(f"\n{parindent}PRIM_POINT_LIGHT, TRUE, <{tint_color[0]:.3f}, {tint_color[1]:.3f}, {tint_color[2]:.3f}>, {light_data["intensity"]:.3f}, {light_data["radius"]:.3f}, {light_data["falloff"]:.3f}")
         if "texture_uuid" in light_data:
+            texture_uuid = light_data["texture_uuid"]
+            object_tree["Projector Texture"] = texture_uuid
             # [ string texture, float fov, float focus, float ambiance ]
-            params.append(f"\n{parindent}PRIM_PROJECTOR, \"{lsl_escape(light_data["texture_uuid"])}\", {light_data["fov"]:.3f}, {light_data["focus"]:.3f}, {light_data["ambiance"]:.3f}")
+            params.append(f"\n{parindent}PRIM_PROJECTOR, {_lsl_texture(texture_uuid)}, {light_data["fov"]:.3f}, {light_data["focus"]:.3f}, {light_data["ambiance"]:.3f}")
 
     material_slots = obj["material_slots"] if is_dict else obj.material_slots
 
@@ -249,7 +271,7 @@ def create_object_properties_lsl(obj, subindent = "", is_linked = True):
             pbr_tree = {
                 "uuid": material["sl_uuid"]
             }
-            params.append(f"\n{parindent}PRIM_RENDER_MATERIAL, {i}, \"{lsl_escape(material["sl_uuid"])}\"")
+            params.append(f"\n{parindent}PRIM_RENDER_MATERIAL, {i}, {_lsl_texture(material["sl_uuid"])}")
             if "sl_gltf_override" in material:
                 pbr_overrides = json.loads(material["sl_gltf_override"])
 
@@ -318,14 +340,14 @@ def create_object_properties_lsl(obj, subindent = "", is_linked = True):
                     face_tree["Base Color Texture"] = image["sl_uuid"]
                     # blinn Phong
                     # [ string texture, vector repeats, vector offsets, float rotation_in_radians ]
-                    params.append(f"\n{parindent}PRIM_TEXTURE, {i}, \"{lsl_escape(image["sl_uuid"])}\", <{texture_ss}, {texture_st}, 1.0>, <{texture_os}, {texture_ot}, 0.0>, {texture_rot}")
+                    params.append(f"\n{parindent}PRIM_TEXTURE, {i}, {_lsl_texture(image["sl_uuid"])}, <{texture_ss}, {texture_st}, 1.0>, <{texture_os}, {texture_ot}, 0.0>, {texture_rot}")
                     # pbr if overridden
                     if pbr_tree is not None:
                         pbr_tree["Base Color Texture"] = image["sl_uuid"]
                     if "pbrMetallicRoughness" in pbr_overrides:
                         pbr_tree["Base Color Texture"] += " Overriden"
                         # [ string texture, vector repeats, vector offsets, float rotation_in_radians, vector color, float alpha, integer gltf_alpha_mode, float alpha_mask_cutoff, integer double_sided ]
-                        params.append(f"\n{parindent}PRIM_GLTF_BASE_COLOR, {i}, \"{lsl_escape(image["sl_uuid"])}\", <{texture_ss}, {texture_st}, 1.0>, <{texture_os}, {texture_ot}, 0.0>, {texture_rot}, {tint_color}, {alpha:.2f}, {alpha_mode}, {alpha_cutoff:.2f}, \"\"")
+                        params.append(f"\n{parindent}PRIM_GLTF_BASE_COLOR, {i}, {_lsl_texture(image["sl_uuid"])}, <{texture_ss}, {texture_st}, 1.0>, <{texture_os}, {texture_ot}, 0.0>, {texture_rot}, {tint_color}, {alpha:.2f}, {alpha_mode}, {alpha_cutoff:.2f}, \"\"")
         else:
             tint_color = principled.inputs["Base Color"].default_value
             tint_color = f"<{tint_color[0]:.3f}, {tint_color[1]:.3f}, {tint_color[2]:.3f}>"
@@ -351,14 +373,14 @@ def create_object_properties_lsl(obj, subindent = "", is_linked = True):
                             face_tree["Normal Map Texture"] = image["sl_uuid"]
                             # blinn Phong
                             # [ string texture, vector repeats, vector offsets, float rotation_in_radians ]
-                            params.append(f"\n{parindent}PRIM_NORMAL, {i}, \"{lsl_escape(image["sl_uuid"])}\", <{texture_ss}, {texture_st}, 1.0>, <{texture_os}, {texture_ot}, 0.0>, {texture_rot}")
+                            params.append(f"\n{parindent}PRIM_NORMAL, {i}, {_lsl_texture(image["sl_uuid"])}, <{texture_ss}, {texture_st}, 1.0>, <{texture_os}, {texture_ot}, 0.0>, {texture_rot}")
                             # pbr if overridden
                             if pbr_tree is not None:
                                 pbr_tree["Normal Map Texture"] = image["sl_uuid"]
                             if "normalTexture" in pbr_overrides:
                                 pbr_tree["Normal Map Texture"] += " Overriden"
                                 #  string texture, vector repeats, vector offsets, float rotation_in_radians ]
-                                params.append(f"\n{parindent}PRIM_GLTF_NORMAL, {i}, \"{lsl_escape(image["sl_uuid"])}\", <{texture_ss}, {texture_st}, 1.0>, <{texture_os}, {texture_ot}, 0.0>, {texture_rot}")
+                                params.append(f"\n{parindent}PRIM_GLTF_NORMAL, {i}, {_lsl_texture(image["sl_uuid"])}, <{texture_ss}, {texture_st}, 1.0>, <{texture_os}, {texture_ot}, 0.0>, {texture_rot}")
 
         # specular map  (blinn phong only, notice by invert color node)
         roughness_input = principled.inputs["Roughness"]
@@ -387,7 +409,7 @@ def create_object_properties_lsl(obj, subindent = "", is_linked = True):
                             face_tree["Specular Map Texture"] = image["sl_uuid"]
                             # blinn phong
                             # [ string texture, vector repeats, vector offsets, float rotation_in_radians, vector color, integer glossiness integer environment ]
-                            params.append(f"\n{parindent}PRIM_SPECULAR, {i}, \"{lsl_escape(image["sl_uuid"])}\", <{texture_ss}, {texture_st}, 1.0>, <{texture_os}, {texture_ot}, 0.0>, {texture_rot}, {spec_color}, {spec_glossiness}, {spec_environment}")
+                            params.append(f"\n{parindent}PRIM_SPECULAR, {i}, {_lsl_texture(image["sl_uuid"])}, <{texture_ss}, {texture_st}, 1.0>, <{texture_os}, {texture_ot}, 0.0>, {texture_rot}, {spec_color}, {spec_glossiness}, {spec_environment}")
             else:
                 # if roughness is set by pbr material, the blinn phong
                 # specular map may exist as node but not be connected
@@ -398,7 +420,7 @@ def create_object_properties_lsl(obj, subindent = "", is_linked = True):
                         image = node.image
                         if "sl_uuid" in image:
                             face_tree["Specular Map Texture"] = image["sl_uuid"]
-                            params.append(f"\n{parindent}PRIM_SPECULAR, {i}, \"{lsl_escape(image["sl_uuid"])}\", <{texture_ss}, {texture_st}, 1.0>, <{texture_os}, {texture_ot}, 0.0>, {texture_rot}, {spec_color}, {spec_glossiness}, {spec_environment}")
+                            params.append(f"\n{parindent}PRIM_SPECULAR, {i}, {_lsl_texture(image["sl_uuid"])}, <{texture_ss}, {texture_st}, 1.0>, <{texture_os}, {texture_ot}, 0.0>, {texture_rot}, {spec_color}, {spec_glossiness}, {spec_environment}")
                         break
 
         # orm map (pbr only)
@@ -425,17 +447,17 @@ def create_object_properties_lsl(obj, subindent = "", is_linked = True):
             roughness_factor = f"{principled.inputs["Roughness"].default_value:.2f}"
         if orm_texture_node is not None or metallic_factor != "\"\"" or roughness_factor != "\"\"":
             orm_texture = "\"\""
-            texture_os = "\"\""
-            texture_ot = "\"\""
-            texture_ss = "\"\""
-            texture_st = "\"\""
+            texture_scale = "\"\""
+            texture_offset = "\"\""
             texture_rot = "\"\""
             if orm_texture_node:
-                orm_texture = f"\"{lsl_escape(orm_texture_node.image["sl_uuid"])}\""
+                orm_texture = _lsl_texture(orm_texture_node.image["sl_uuid"])
                 texture_os, texture_ot, texture_ss, texture_st, texture_rot = _get_trans(orm_texture_node)
+                texture_scale = f"<{texture_ss}, {texture_st}, 1.0>"
+                texture_offset = f"<{texture_os}, {texture_ot}, 0.0>"
             # pbr
             # [ string texture, vector repeats, vector offsets, float rotation_in_radians, float metallic_factor, float roughness_factor ]
-            params.append(f"\n{parindent}PRIM_GLTF_METALLIC_ROUGHNESS, {i}, {orm_texture}, <{texture_ss}, {texture_st}, 1.0>, <{texture_os}, {texture_ot}, 0.0>, {texture_rot}, {metallic_factor}, {roughness_factor}")
+            params.append(f"\n{parindent}PRIM_GLTF_METALLIC_ROUGHNESS, {i}, {orm_texture}, {texture_scale}, {texture_offset}, {texture_rot}, {metallic_factor}, {roughness_factor}")
 
         # emissive map (pbr only)
         emissive_texture_node = None
@@ -456,17 +478,17 @@ def create_object_properties_lsl(obj, subindent = "", is_linked = True):
             emission_factor = f"<{emission_factor[0]:.2f}, {emission_factor[1]:.2f}, {emission_factor[2]:.2f}>"
         if emissive_texture_node is not None or emission_factor != "\"\"":
             emission_texture = "\"\""
-            texture_os = "\"\""
-            texture_ot = "\"\""
-            texture_ss = "\"\""
-            texture_st = "\"\""
+            texture_scale = "\"\""
+            texture_offset = "\"\""
             texture_rot = "\"\""
             if emissive_texture_node:
-                emission_texture = f"\"{lsl_escape(emissive_texture_node.image["sl_uuid"])}\""
+                emission_texture = _lsl_texture(emissive_texture_node.image["sl_uuid"])
                 texture_os, texture_ot, texture_ss, texture_st, texture_rot = _get_trans(emissive_texture_node)
+                texture_scale = f"<{texture_ss}, {texture_st}, 1.0>"
+                texture_offset = f"<{texture_os}, {texture_ot}, 0.0>"
             # pbr
             #  [ string texture, vector repeats, vector offsets, float rotation_in_radians, vector emissive_tint ]
-            params.append(f"\n{parindent}PRIM_GLTF_EMISSIVE, {i}, {emission_texture}, <{texture_ss}, {texture_st}, 1.0>, <{texture_os}, {texture_ot}, 0.0>, {texture_rot}, {emission_factor}")
+            params.append(f"\n{parindent}PRIM_GLTF_EMISSIVE, {i}, {emission_texture}, {texture_scale}, {texture_offset}, {texture_rot}, {emission_factor}")
 
         if pbr_tree is not None:
             face_tree["PBR Material"] = pbr_tree
@@ -497,7 +519,8 @@ def create_lsl_script():
     if not bpy.data.objects:
         return "default\n{\n    \\\\ No Objects Available\n}"
 
-    lsl_text = """default
+    lsl_text = LSL_TEXTURE_GRAB_FUNC + """
+default
 {
     state_entry()
     {
