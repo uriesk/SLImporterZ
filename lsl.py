@@ -36,10 +36,13 @@ def lsl_escape(s):
     return s.replace("\\", "\\\\").replace('"', '\\"')
 
 def _lsl_texture(uuid):
-    images = {}
     for image in bpy.data.images:
         if image.get("sl_uuid") == uuid:
             return f"GetTextureFromNameOrKey(\"{lsl_escape(image.name)}\", \"{lsl_escape(uuid)}\")"
+
+    for material in bpy.data.materials:
+        if material.get("sl_uuid") == uuid:
+            return f"GetTextureFromNameOrKey(\"{lsl_escape(material.name)}\", \"{lsl_escape(uuid)}\")"
     return f"\"{uuid}\""
 
 def _get_trans(node):
