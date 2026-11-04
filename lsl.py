@@ -507,9 +507,9 @@ def create_uuid_tree():
     # create tree of object sl uuids
     objects_tree = {}
 
-    if bpy.data.objects:
-        for obj in bpy.data.objects:
-            if obj.type != "MESH":
+    if bpy.context.scene.objects:
+        for obj in bpy.context.scene.objects:
+            if obj.type != "MESH" or not obj.visible_get():
                 continue
             if obj.name.endswith(('_LOD0', '_LOD1', '_LOD2', '_PHYS')):
                 continue
@@ -520,7 +520,7 @@ def create_uuid_tree():
 
 def create_lsl_script():
     # creates lsl script for setting properties and textures by uuid
-    if not bpy.data.objects:
+    if not bpy.context.scene.objects:
         return "default\n{\n    \\\\ No Objects Available\n}"
 
     lsl_text = LSL_TEXTURE_GRAB_FUNC + """
@@ -551,8 +551,8 @@ default
     indent = "            "
 
     amount_added = 0
-    for obj in bpy.data.objects:
-        if obj.type != "MESH":
+    for obj in bpy.context.scene.objects:
+        if obj.type != "MESH" or not obj.visible_get():
             continue
         if obj.name.endswith(('_LOD0', '_LOD1', '_LOD2', '_PHYS')):
             continue
