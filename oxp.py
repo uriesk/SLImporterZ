@@ -1005,7 +1005,14 @@ default
                     obj = obj_data["obj"]
 
                     suffix = f"_{type_name}" if type_name else ""
-                    obj.name = name + suffix
+                    object_name = name + suffix
+
+                    i = 1
+                    while object_name in bpy.data.objects:
+                        object_name = f"{name}.{i:03d}{suffix}"
+                        i += 1
+
+                    obj.name = object_name
 
                     for key, value in custom_properties.items():
                         obj[key] = value

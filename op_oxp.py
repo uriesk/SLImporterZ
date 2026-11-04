@@ -58,7 +58,7 @@ class SLIZ_IMPORT_oxp(bpy.types.Operator, ImportHelper):
         description=(
             "Extracts all LOD level"
         ),
-        default=False,
+        default=True,
     )
     create_debug_info: bpy.props.BoolProperty(
         name="Create Debug Info",
