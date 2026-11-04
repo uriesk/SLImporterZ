@@ -225,10 +225,11 @@ def create_object_properties_lsl(obj, subindent = "", is_linked = True):
         physics_shape = physics_data.get("shape")
         if physics_shape is not None:
             if physics_shape != 1:
-                params.append(f"\n{parindent}PRIM_PHYSICS_SHAPE_TYPE, {physics_shape}")
+                link_lsl = "link_num" if is_linked else "LINK_THIS"
+                lsl_text += f"{subindent}if (llGetAttached() == 0)\n{subindent}{{\n{parindent}llSetLinkPrimitiveParamsFast({link_lsl}, [PRIM_PHYSICS_SHAPE_TYPE, {physics_shape}]);\n{subindent}}}\n"
             elif is_linked:
                 # if not root prim (offset, because it is 0 if not in linkset, otherwise 1)
-                lsl_text += f"{subindent}if (link_num != offset)\n{subindent}{{\n{parindent}llSetLinkPrimitiveParamsFast(link_num, [PRIM_PHYSICS_SHAPE_TYPE, {physics_shape}]);\n{subindent}}}\n"
+                lsl_text += f"{subindent}if (link_num != offset && llGetAttached() == 0)\n{subindent}{{\n{parindent}llSetLinkPrimitiveParamsFast(link_num, [PRIM_PHYSICS_SHAPE_TYPE, {physics_shape}]);\n{subindent}}}\n"
 
     if "sl_texture_anim" in obj:
         texture_anim_data = json.loads(obj["sl_texture_anim"])
