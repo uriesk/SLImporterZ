@@ -83,9 +83,18 @@ def move_objs_into_collections(imported_mesh_objects, collection_name=None):
 
     for obj_data in imported_mesh_objects:
         type_name = obj_data["type_name"]
-        prefix = f"{type_name}_" if type_name else ""
+        mesh_collection_name = None
+        if type_name:
+            if collection_name:
+                mesh_collection_name = f"{type_name}_{collection_name}"
+            else:
+                mesh_collection_name = type_name
+        elif collection_name:
+            mesh_collection_name = collection_name
+        else:
+            mesh_collection_name = "Collection"
+
         obj = obj_data["obj"]
-        mesh_collection_name = prefix + collection_name if collection_name else type_name
         mesh_collection = None
         if mesh_collection_name:
             mesh_collection = bpy.data.collections.get(mesh_collection_name)

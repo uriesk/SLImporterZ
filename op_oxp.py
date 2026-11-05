@@ -51,7 +51,7 @@ class SLIZ_IMPORT_oxp(bpy.types.Operator, ImportHelper):
         description=(
             "Create a Collection for every imported Linkset"
         ),
-        default=True,
+        default=False,
     )
     extract_lods: bpy.props.BoolProperty(
         name="Load all LOD levels",

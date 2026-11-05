@@ -186,7 +186,7 @@ class SLIZ_IMPORT_slm(bpy.types.Operator, ImportHelper):
                     extract_lods=self.extract_lods,
                     armature_pose= self.armature_pose
                 )
-                move_objs_into_collections(imported_mesh_objects)
+                slm.move_objs_into_collections(imported_mesh_objects)
         except Exception as e:
             traceback.print_exc()
             self._notify({'ERROR'}, str(e))
