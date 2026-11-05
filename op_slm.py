@@ -51,7 +51,7 @@ class SLIZ_IMPORT_slm(bpy.types.Operator, ImportHelper):
         description=(
             "Extracts all LOD level"
         ),
-        default=False,
+        default=True,
     )
     create_debug_info: bpy.props.BoolProperty(
         name="Create Debug Info",
@@ -176,6 +176,12 @@ class SLIZ_IMPORT_slm(bpy.types.Operator, ImportHelper):
             self._notify({'ERROR'}, str(e))
             return {'CANCELLED'}
         return {'FINISHED'}
+
+    def draw(self, context):
+        layout = self.layout
+        layout.prop(self, "extract_lods")
+        layout.separator()
+        layout.prop(self, "create_debug_info")
 
     def invoke(self, context, event):
         context.window_manager.fileselect_add(self)

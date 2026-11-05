@@ -186,6 +186,13 @@ class SLIZ_IMPORT_oxp(bpy.types.Operator, ImportHelper):
             self._notify({'INFO'}, f"Imported {amount_meshes} meshes from {self.filepath}")
         return {'FINISHED'}
 
+    def draw(self, context):
+        layout = self.layout
+        layout.prop(self, "create_collections")
+        layout.prop(self, "extract_lods")
+        layout.separator()
+        layout.prop(self, "create_debug_info")
+
     def invoke(self, context, event):
         context.window_manager.fileselect_add(self)
         return {'RUNNING_MODAL'}
