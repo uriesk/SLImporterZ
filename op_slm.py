@@ -53,6 +53,21 @@ class SLIZ_IMPORT_slm(bpy.types.Operator, ImportHelper):
         ),
         default=True,
     )
+    armature_pose: bpy.props.EnumProperty(
+        name="Pose",
+        description=(
+            "Pose used for newly created armatures. "
+            "SL Rest Pose bakes the mesh in a T-pose; "
+            "Current Pose uses the skinned mesh's pose"
+        ),
+        items=[
+            ('TPOSE', "SL T-Pose",
+            "Create the armature in SL rest pose (T-pose) and bake the mesh onto it"),
+            ('CURRENT', "From Model",
+            "Create the armature in the pose of the skinned mesh"),
+        ],
+        default='CURRENT',
+    )
     create_debug_info: bpy.props.BoolProperty(
         name="Create Debug Info",
         description=(
@@ -168,7 +183,8 @@ class SLIZ_IMPORT_slm(bpy.types.Operator, ImportHelper):
                     name,
                     filepath=self.filepath,
                     create_debug_info=self.create_debug_info,
-                    extract_lods=self.extract_lods
+                    extract_lods=self.extract_lods,
+                    armature_pose= self.armature_pose
                 )
                 move_objs_into_collections(imported_mesh_objects)
         except Exception as e:
@@ -177,9 +193,24 @@ class SLIZ_IMPORT_slm(bpy.types.Operator, ImportHelper):
             return {'CANCELLED'}
         return {'FINISHED'}
 
+    def draw_header(self, context):
+        self.layout.label(text="Armature Options")
+
     def draw(self, context):
         layout = self.layout
+        layout.prop(self, "create_collections")
         layout.prop(self, "extract_lods")
+
+        layout.separator()
+        header, panel = layout.panel("armature_options", default_closed=False)
+        header.label(text="Armature")
+        if panel:
+            panel.prop(self, "armature_pose")
+            panel.label(
+                text="Only applies when a new armature is created.",
+                icon='INFO',
+            )
+
         layout.separator()
         layout.prop(self, "create_debug_info")
 

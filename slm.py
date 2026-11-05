@@ -410,6 +410,7 @@ def import_slm(stream, name, **kwargs):
     filepath = kwargs.get("filepath")
     create_debug_info = kwargs.get("create_debug_info", False)
     extract_lods = kwargs.get("extract_lods", False)
+    armature_pose= kwargs.get("armature_pose", "TPOSE")
 
     # create stream if its not one, stream needs to be seekable
     if isinstance(stream, bytes):
@@ -470,6 +471,8 @@ def import_slm(stream, name, **kwargs):
                     bake_to_existing_armature = True
             if armature is None:
                 armature = skeleton.add_skeleton(bpy.context)
+                if armature_pose == "TPOSE":
+                    bake_to_existing_armature = True
 
             for joint_name in joint_names:
                 armature.data.bones[joint_name].use_deform = True

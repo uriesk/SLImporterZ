@@ -36,6 +36,7 @@ class OXPParser():
         self.create_debug_info = kwargs.get("create_debug_info", False)
         self.extract_lods = kwargs.get("extract_lods", False)
         self.create_collections = kwargs.get("create_collections", True)
+        self.armature_pose= kwargs.get("armature_pose", "TPOSE")
         self.temp_dir = None
         self.oxp_data = None
         self.filepath = None
@@ -949,7 +950,8 @@ default
                     mesh_uuid, # name
                     filepath=slm_filepath,
                     create_debug_info=self.create_debug_info,
-                    extract_lods=self.extract_lods
+                    extract_lods=self.extract_lods,
+                    armature_pose= self.armature_pose
                 )
             if not imported_mesh_objects:
                 continue

@@ -60,6 +60,21 @@ class SLIZ_IMPORT_oxp(bpy.types.Operator, ImportHelper):
         ),
         default=True,
     )
+    armature_pose: bpy.props.EnumProperty(
+        name="Pose",
+        description=(
+            "Pose used for newly created armatures. "
+            "SL Rest Pose bakes the mesh in a T-pose; "
+            "Current Pose uses the skinned mesh's pose"
+        ),
+        items=[
+            ('TPOSE', "SL T-Pose",
+            "Create the armature in SL rest pose (T-pose) and bake the mesh onto it"),
+            ('CURRENT', "From Model",
+            "Create the armature in the pose of the skinned mesh"),
+        ],
+        default='CURRENT',
+    )
     create_debug_info: bpy.props.BoolProperty(
         name="Create Debug Info",
         description=(
@@ -169,7 +184,8 @@ class SLIZ_IMPORT_oxp(bpy.types.Operator, ImportHelper):
         oxp_parser = oxp.OXPParser(
             create_debug_info=self.create_debug_info,
             extract_lods=self.extract_lods,
-            create_collections=self.create_collections
+            create_collections=self.create_collections,
+            armature_pose= self.armature_pose
         )
         try:
             amount_imported_meshes, amount_meshes = oxp_parser.parse_from_file(self.filepath)
@@ -186,10 +202,24 @@ class SLIZ_IMPORT_oxp(bpy.types.Operator, ImportHelper):
             self._notify({'INFO'}, f"Imported {amount_meshes} meshes from {self.filepath}")
         return {'FINISHED'}
 
+    def draw_header(self, context):
+        self.layout.label(text="Armature Options")
+
     def draw(self, context):
         layout = self.layout
         layout.prop(self, "create_collections")
         layout.prop(self, "extract_lods")
+
+        layout.separator()
+        header, panel = layout.panel("armature_options", default_closed=False)
+        header.label(text="Armature")
+        if panel:
+            panel.prop(self, "armature_pose")
+            panel.label(
+                text="Only applies when a new armature is created.",
+                icon='INFO',
+            )
+
         layout.separator()
         layout.prop(self, "create_debug_info")
 
