@@ -222,26 +222,39 @@ class LLSDBinaryParser():
 
             asset_occurances = self._find_asset_in_data(self._data, uuid)
 
-            target_filepath = None
+            target_extension = ".bin"
+            target_name = uuid
             for asset_data in asset_occurances:
+                if "name" in asset_data:
+                    target_name = asset_data["name"]
                 if "type" in asset_data:
                     match asset_data["type"]:
                         case "texture":
-                            target_filepath = path_join(self.asset_folder, uuid + ".jp2")
+                            target_extension = ".jp2"
                             break
                         case "lsltext":
-                            target_filepath = path_join(self.asset_folder, uuid + ".lsl")
+                            target_extension = ".lsl"
                             break
                         case "notecard":
-                            target_filepath = path_join(self.asset_folder, uuid + ".txt")
+                            target_extension = ".txt"
                             break
                         case "material":
-                            target_filepath = path_join(self.asset_folder, uuid + ".slmat")
+                            target_extension = ".slmat"
+                            break
+                        case "animatn":
+                            target_extension = ".anim"
                             break
                         case "mesh":
-                            target_filepath = path_join(self.asset_folder, uuid + ".slm")
+                            target_extension = ".slm"
                             break
-            if target_filepath is None or not os.path.exists(origin_filepath):
+
+            target_filepath = path_join(self.asset_folder, target_name + target_extension)
+
+            if target_filepath == origin_filepath:
+                continue
+            if os.path.exists(target_filepath) and target_name != uuid:
+                target_filepath = path_join(self.asset_folder, uuid + target_extension)
+            if target_filepath == origin_filepath or not os.path.exists(origin_filepath):
                 continue
 
             os.rename(origin_filepath, target_filepath)
@@ -249,7 +262,7 @@ class LLSDBinaryParser():
                 asset_data["filepath"] = target_filepath
 
     def _find_asset_in_data(self, data, uuid):
-        # find all orrucances of { uuid: { filepath }} where the filepath
+        # find all orrucances of { uuid: { filepath, [name] }} where the filepath
         # matches the asset_folder and uuid filename
         occurances = []
         if isinstance(data, dict):
