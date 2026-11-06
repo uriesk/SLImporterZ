@@ -17,6 +17,7 @@
 '''
 
 import bpy
+import bmesh
 
 from . import llsdz
 from . import utils
@@ -79,10 +80,21 @@ def move_objs_into_collections(imported_mesh_objects, collection_name=None):
     #   type_name: "LOD0",
     #   is_skinned: False,
     #   obj,
+    # }{
+    #   lod_name: "physics_convex",
+    #   type_name: "PHYS",
+    #   info: "8x32",
+    #   is_skinned: False,
+    #   obj,
     # }, ...]
 
     for obj_data in imported_mesh_objects:
         type_name = obj_data["type_name"]
+
+        # info is written into collection name
+        if "info" in obj_data:
+            type_name += "_" + obj_data["info"]
+
         mesh_collection_name = None
         if type_name:
             if collection_name:
@@ -149,11 +161,11 @@ def import_lod_mesh(lod_data, name, **kwargs):
             continue
 
         if "PositionDomain" in face:
-            domain_max = face["PositionDomain"]["Max"]
             domain_min = face["PositionDomain"]["Min"]
+            domain_max = face["PositionDomain"]["Max"]
         else:
-            domain_max = [0.5, 0.5, 0.5]
             domain_min = [-0.5, -0.5, -0.5]
+            domain_max = [0.5, 0.5, 0.5]
 
         # Get vertices
         vertices_offset = len(vertices) # total vertices offset of face
@@ -378,6 +390,79 @@ def import_lod_mesh(lod_data, name, **kwargs):
     obj.location = (0, 0, 0)
     return obj
 
+def _build_merged_hulls_mesh(hulls_data, name, domain_min, domain_max):
+    # hulls_data is a list of hulls to merge
+    if not isinstance(hulls_data, list):
+        hulls_data = [hulls_data]
+
+    bm = bmesh.new()
+
+    for data in hulls_data:
+        num_vertices = len(data) // 6
+        verts = []
+        for i in range(num_vertices):
+            offset = i * 6
+            x = struct.unpack('<H', data[offset:offset+2])[0]
+            y = struct.unpack('<H', data[offset+2:offset+4])[0]
+            z = struct.unpack('<H', data[offset+4:offset+6])[0]
+            x_float = domain_min[0] + (x / 65535.0) * (domain_max[0] - domain_min[0])
+            y_float = domain_min[1] + (y / 65535.0) * (domain_max[1] - domain_min[1])
+            z_float = domain_min[2] + (z / 65535.0) * (domain_max[2] - domain_min[2])
+            verts.append(bm.verts.new((x_float, y_float, z_float)))
+
+            print(f"Convex hull Vertice {x_float}x{y_float}x{z_float}")
+
+        print(f"Convex hull with {len(verts)} vertices")
+        if verts:
+            bmesh.ops.convex_hull(bm, input=verts)
+
+    mesh = bpy.data.meshes.new(name)
+    bm.to_mesh(mesh)
+    bm.free()
+
+    obj = bpy.data.objects.new(name, mesh)
+    obj.location = (0, 0, 0)
+    return obj
+
+def import_convex_mesh(convex_data, name, **kwargs):
+    hull_object = None
+    vertices_per_hull = []
+    if not convex_data:
+        return hull_object, hulls_data
+    # convex_data:
+    #  [{
+    #    BoundingVerts,
+    #    HullList,
+    #    Max: [x, y, z],
+    #    Min: [x, y, z],
+    #    Positions,
+    #  }, ...]
+    domain_min = convex_data.get("Min", [-0.5, -0.5, -0.5])
+    domain_max = convex_data.get("Max", [0.5, 0.5, 0.5])
+
+    # convex hull consisting of multiple hulls, this is set when "Analyse" got
+    # done in the upload window
+    hull_list_offsets = convex_data.get("HullList")
+    data = convex_data.get("Positions")
+    if hull_list_offsets and data:
+        hulls_data = []
+        start_offset = 0
+        for i in range(len(hull_list_offsets)):
+            num_vertices = struct.unpack_from('<B', hull_list_offsets, i)[0]
+            if num_vertices == 0:
+                num_vertices = 256
+            vertices_per_hull.append(num_vertices)
+            print(f"Hull with {num_vertices} vertices")
+            hull_data_length = num_vertices * 6
+            hull_data = data[start_offset:start_offset + hull_data_length]
+            hulls_data.append(hull_data)
+            start_offset += num_vertices * hull_data_length
+
+        if hulls_data:
+            hull_object = _build_merged_hulls_mesh(hulls_data, name, domain_min, domain_max)
+
+    return hull_object, vertices_per_hull
+
 def read_compressed_llsd_from_stream(stream, offset, size):
     stream.seek(offset - stream.tell(), io.SEEK_CUR)
 
@@ -597,6 +682,34 @@ def import_slm(stream, name, **kwargs):
                     mod = mesh_object.modifiers.new(name="Armature", type='ARMATURE')
                     mod.object = armature
                     mod.use_vertex_groups = True
+
+    if "physics_convex" in slm_metadata:
+        convex_offset = start_pos + header_size + slm_metadata["physics_convex"]["offset"]
+        convex_size = slm_metadata["physics_convex"]["size"]
+        convex_data = read_compressed_llsd_from_stream(stream, convex_offset, convex_size)
+        type_name = "PHYS"
+
+        if create_debug_info and filepath is not None:
+            # Print structure into debug file within same folder
+            tree_lines = []
+            tree_lines.extend(utils.print_tree(convex_data))
+            tree_filepath = os.path.splitext(filepath)[0] + "_convextree" + ".txt"
+            with open(tree_filepath, 'w', encoding='utf-8') as f:
+                f.write('\n'.join(tree_lines))
+
+        mesh_object, vertices_per_hull = import_convex_mesh(
+            convex_data,
+            name  + "_" + type_name
+        )
+        if mesh_object is not None and vertices_per_hull:
+            imported_mesh_objects.append({
+                "lod_name": "physics_convex",
+                "info": f"CONVX_{len(vertices_per_hull)}x{max(vertices_per_hull)}",
+                "type_name": type_name,
+                "is_skinned": False,
+                "normalized_scale": [1.0, 1.0, 1.0],
+                "obj": mesh_object
+            })
 
     if armature is not None and not bake_to_existing_armature:
         skeleton.set_pose_matrices(armature, old_bone_matrices)
