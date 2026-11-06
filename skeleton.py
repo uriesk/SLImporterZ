@@ -84,7 +84,15 @@ def add_skeleton(context, write_json=True):
 
     armature = bpy.data.armatures.new(name="Armature")
     armature_obj = bpy.data.objects.new("Armature", armature)
-    context.collection.objects.link(armature_obj)
+
+    collection_name = "Armatures"
+    armature_collection = bpy.data.collections.get(collection_name)
+    if armature_collection is None:
+        armature_collection = bpy.data.collections.new(collection_name)
+        bpy.context.scene.collection.children.link(armature_collection)
+        armature_collection.color_tag = "COLOR_06"
+    armature_collection.objects.link(armature_obj)
+
     armature_obj.select_set(True)
     context.view_layer.objects.active = armature_obj
     bpy.ops.object.mode_set(mode='EDIT', toggle=False)
