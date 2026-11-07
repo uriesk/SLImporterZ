@@ -79,7 +79,7 @@ def create_prim_shape_lsl(prim_data, subindent, link_reference_text = "LINK_THIS
 
     lsl_text += f"{parindent}PRIM_SIZE, <{prim_scale[0]:.6f}, {prim_scale[1]:.6f}, {prim_scale[2]:.6f}>,\n"
 
-    lsl_text += f"{parindent}PRIM_NAME, \"{lsl_escape(prim_data["name"])}\"\n"
+    lsl_text += f"{parindent}PRIM_NAME, \"{lsl_escape(prim_data["name"])}\",\n"
 
     path_curve = path.get("curve")
     profile_curve = profile.get("curve")
@@ -299,6 +299,8 @@ def create_object_properties_lsl(obj, subindent = "", is_linked = True):
             params.append(f"\n{parindent}PRIM_FULLBRIGHT, {i}, TRUE")
         if "sl_glow" in material and material["sl_glow"] != 0.0:
             params.append(f"\n{parindent}PRIM_GLOW, {i}, {material["sl_glow"]:.3f}")
+        if "sl_texgen" in material and material["sl_texgen"]:
+            params.append(f"\n{parindent}PRIM_TEXGEN, {i}, PRIM_TEXGEN_PLANAR")
 
         # tint color and alpha
         tint_color = "<1.000, 1.000, 1.000>"
