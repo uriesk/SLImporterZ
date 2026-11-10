@@ -254,7 +254,16 @@ def create_object_properties_lsl(obj, subindent = "", is_linked = True):
             # [ string texture, float fov, float focus, float ambiance ]
             params.append(f"\n{parindent}PRIM_PROJECTOR, {_lsl_texture(texture_uuid)}, {light_data["fov"]:.3f}, {light_data["focus"]:.3f}, {light_data["ambiance"]:.3f}")
 
-    material_slots = obj["material_slots"] if is_dict else obj.material_slots
+    material_slots = None
+    if is_dict:
+        material_slots = obj["material_slots"]
+    else:
+        # GLTF upload ssigns face numbers based on alphabetically sorted
+        # material names
+        material_slots = sorted(
+            obj.material_slots,
+            key=lambda slot: (slot.material.name if slot.material else "").lower()
+        )
 
     for i, slot in enumerate(material_slots):
         material = slot.get("material") if is_dict else slot.material

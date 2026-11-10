@@ -577,7 +577,7 @@ class OXPParser():
             # would override this anyway.
             mat["sl_fullbright"] = texture_data.get("fullbright", 0)
             mat["sl_glow"] = texture_data.get("glow", 0.0)
-            # whether texture scale / repeate options are in texture repeats
+            # whether texture scale / repeat options are in texture repeats
             # per face or in repeats per half meter
             mat["sl_texgen"] = texture_data.get("texgen", 0)
             spec_color = material_data.get("SpecColor", [255, 255, 255, 255]);
